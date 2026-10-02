@@ -66,6 +66,14 @@ The server only seats players and relays their moves (each player's own machine 
 ./deploy.sh root@<droplet-ip> arcade.example.com   # HTTPS via Caddy (point the domain's A record at the server first)
 ```
 
+No terminal tools (Windows, say)? Skip `deploy.sh`: open the server's web console (DigitalOcean: the droplet's **Access → Launch Droplet Console**) and run, as root,
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh
+```
+
+which clones this repo on the server and does the same build. Add ` -s arcade.example.com` after `sh` for HTTPS.
+
 `deploy.sh` copies this checkout to the server, installs Node 22, builds the client (adding swap on 1 GB machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
 ### Free: Oracle Cloud Always Free
