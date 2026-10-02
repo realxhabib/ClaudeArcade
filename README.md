@@ -115,6 +115,8 @@ Each match seats 8 (bots fill the empty seats). When every match is full, the ne
 
 The server barely works for it: players' games connect to each other directly where they can, and the server only relays the moves of those whose networks block that. Measured with every player relayed (`node server/load.mjs 240`, the worst case): 200 players in 25 matches took about a fifth of one CPU core and 110 MB of memory, sending about 4.7 MB/s. So the smallest droplet holds the default limit; `/health` shows the matches and the load.
 
+With a domain (`… | sh -s <domain>`, or `./deploy.sh <host> <domain>`), the arcade is served only over HTTPS: its own port listens on 127.0.0.1, where Caddy reaches it, and is closed to the outside. A free name that already points at your server is `<ip-with-dashes>.sslip.io`, e.g. `174-138-34-59.sslip.io`.
+
 `deploy.sh` copies this checkout to the server, installs Node 22, builds the client there (adding swap on small machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
 ### Free: Oracle Cloud Always Free

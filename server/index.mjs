@@ -1,7 +1,8 @@
 // The arcade server: serves the game client and runs the always-on matches of
 // each game on the same port (WebSocket at /lobby?game=frontline|rally&name=...).
 // Usage: node index.mjs
-// PORT (default 8787), CLIENT_DIR (default ../client/dist) and MAX_MATCHES
+// PORT (default 8787), HOST (default every interface; 127.0.0.1 behind an HTTPS
+// proxy, so the port isn't reachable from outside), CLIENT_DIR (default ../client/dist) and MAX_MATCHES
 // (default 25 per game, 8 players each) from the env.
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
@@ -12,6 +13,7 @@ import { Arcade, DEFAULT_MAX_MATCHES } from "./arcade.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 8787);
+const HOST = process.env.HOST || undefined;
 const CLIENT_DIR = resolve(process.env.CLIENT_DIR ?? join(here, "../client/dist"));
 const MAX_MESSAGE_BYTES = 128 * 1024;
 const MESSAGES_PER_SECOND = 120;
@@ -131,4 +133,4 @@ function accept(ws, arcade, name) {
   });
 }
 
-server.listen(PORT, () => console.log(`claudearcade: http://localhost:${PORT} (client ${CLIENT_DIR})`));
+server.listen(PORT, HOST, () => console.log(`claudearcade: http://${HOST ?? "localhost"}:${PORT} (client ${CLIENT_DIR})`));

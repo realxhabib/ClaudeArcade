@@ -2,6 +2,8 @@
 # Runs on the server as root (via sudo), from deploy.sh: installs Node, builds
 # the Frontline client, and (re)starts the arcade server as a service. Safe to rerun.
 # PORT (default 8787) picks the port, for a server that already runs something on 8787.
+# With a domain, the arcade is served over HTTPS by Caddy and its own port only listens on
+# 127.0.0.1, closed to the outside; without one, it's served on http://<ip>:PORT.
 set -eu
 
 DOMAIN="${1:-}"
@@ -41,7 +43,8 @@ chown -R claudearcade "$APP"
 # Oracle Cloud's Ubuntu images block every port but SSH in iptables (on top of the
 # console's security list): let the arcade's ports in.
 if command -v iptables >/dev/null && iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
-	for port in "$PORT" 80 443; do
+	if [ -n "$DOMAIN" ]; then ports="80 443"; else ports="$PORT"; fi
+	for port in $ports; do
 		if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
 			# Just above the catch-all REJECT, so the rule is reached.
 			at=$(iptables -L INPUT --line-numbers -n | awk '/REJECT/ {print $1; exit}')
@@ -53,7 +56,7 @@ fi
 
 # DigitalOcean's images ship ufw off, but if it was turned on, let the arcade's port in.
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active'; then
-	ufw allow "$PORT/tcp" >/dev/null
+	if [ -n "$DOMAIN" ]; then ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null; else ufw allow "$PORT/tcp" >/dev/null; fi
 fi
 
 # Something else (another app on this server) on the port? Say so rather than fail quietly.
@@ -64,6 +67,8 @@ if ! node -e "require('net').createServer().once('error', () => process.exit(1))
 fi
 
 sed "s/^Environment=PORT=.*/Environment=PORT=$PORT/" /tmp/claudearcade.service > /etc/systemd/system/claudearcade.service
+# Behind Caddy, only Caddy (on this machine) talks to the arcade's port.
+if [ -n "$DOMAIN" ]; then sed -i "/^Environment=PORT=/a Environment=HOST=127.0.0.1" /etc/systemd/system/claudearcade.service; fi
 chmod 644 /etc/systemd/system/claudearcade.service
 systemctl daemon-reload
 systemctl enable -q claudearcade
