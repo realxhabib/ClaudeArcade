@@ -12,7 +12,9 @@ export type ScoreRow = { seat: number; kills: number; deaths: number };
 
 export interface Welcome {
   you: string | null;
-  /** Bumps when an empty lobby starts over. */
+  /** Which of the server's matches this is (it opens more as they fill). */
+  match: number;
+  /** Unique on the server; bumps when an empty match starts over. */
   session: number;
   players: LobbyPlayer[];
   online: string[];
@@ -30,7 +32,7 @@ type ServerMessage =
   | { t: "ack"; rid: number; version: number }
   | { t: "nack"; rid: number; code: string; message: string }
   | { t: "scores"; scores: ScoreRow[] }
-  | { t: "reseat"; you: string }
+  | { t: "reseat"; you: string | null }
   | { t: "pong"; at: number | null };
 
 export interface LobbyEvents {
@@ -38,7 +40,7 @@ export interface LobbyEvents {
   room: (from: string, type: string, payload: Json) => void;
   state: (state: Json | null, version: number, by: string) => void;
   scores: (scores: ScoreRow[]) => void;
-  /** A seat freed up for us (we were watching): the game reloads into it. */
+  /** A seat freed up for us, here or in another match (we were watching): the game reloads into it. */
   reseat: () => void;
   closed: () => void;
 }

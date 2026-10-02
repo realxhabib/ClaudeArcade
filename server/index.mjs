@@ -1,12 +1,13 @@
-// The arcade server: serves the Frontline client and runs the always-on lobby
-// on the same port (WebSocket at /lobby?name=...). Usage: node index.mjs
-// PORT (default 8787) and CLIENT_DIR (default ../client/dist) from the env.
+// The arcade server: serves the Frontline client and runs the always-on
+// matches on the same port (WebSocket at /lobby?name=...). Usage: node index.mjs
+// PORT (default 8787), CLIENT_DIR (default ../client/dist) and MAX_MATCHES
+// (default 25, 8 players each) from the env.
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import { Lobby } from "./lobby.mjs";
+import { Arcade, DEFAULT_MAX_MATCHES } from "./arcade.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 8787);
@@ -30,14 +31,24 @@ const TYPES = {
   ".md": "text/markdown; charset=utf-8",
 };
 
-const lobby = new Lobby();
-setInterval(() => lobby.tick(), 1000);
+const arcade = new Arcade({ maxMatches: Number(process.env.MAX_MATCHES ?? DEFAULT_MAX_MATCHES) });
+setInterval(() => arcade.tick(), 1000);
+
+// Load over the last second, for /health: messages in and out, and kilobytes sent.
+const load = { in: 0, out: 0, bytes: 0 };
+let lastLoad = { messagesIn: 0, messagesOut: 0, kbOut: 0 };
+setInterval(() => {
+  lastLoad = { messagesIn: load.in, messagesOut: load.out, kbOut: Math.round(load.bytes / 1024) };
+  load.in = load.out = load.bytes = 0;
+}, 1000);
+/** A message broadcast to a match is the same object for every connection: encode it once. */
+const encoded = new WeakMap();
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   if (url.pathname === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, online: lobby.online().length, players: lobby.players().filter((p) => !p.isBot).map((p) => p.name) }));
+    res.end(JSON.stringify({ ...arcade.health(), load: lastLoad }));
     return;
   }
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -71,11 +82,20 @@ function accept(ws, name) {
     seat: null,
     name: null,
     send: (msg) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+      if (ws.readyState !== ws.OPEN) return;
+      let text = encoded.get(msg);
+      if (text === undefined) {
+        text = JSON.stringify(msg);
+        encoded.set(msg, text);
+      }
+      load.out += 1;
+      load.bytes += text.length;
+      ws.send(text);
     },
   };
-  conn.send(lobby.join(conn, name));
+  conn.send(arcade.join(conn, name));
   ws.on("message", (data) => {
+    load.in += 1;
     if (--budget < 0) return; // a client gone wrong can't flood the lobby
     let msg;
     try {
@@ -83,12 +103,12 @@ function accept(ws, name) {
     } catch {
       return;
     }
-    const reply = lobby.handle(conn, msg);
+    const reply = arcade.handle(conn, msg);
     if (reply) conn.send(reply);
   });
   ws.on("close", () => {
     clearInterval(refill);
-    lobby.leave(conn);
+    arcade.leave(conn);
   });
 }
 

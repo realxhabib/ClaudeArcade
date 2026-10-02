@@ -84,6 +84,12 @@ which clones this repo on the server and does the same build. Add ` -s arcade.ex
 
 Already running something else on the server? The arcade can share it: it only needs a port of its own. If something already uses 8787 there, pick another, `PORT=8788 ./deploy.sh root@<droplet-ip>` or `curl … | PORT=8788 sh`, and use `http://<droplet-ip>:8788` as the address. (The installer stops and says so if the port is taken.) With a domain it adds the arcade to Caddy alongside any sites already there, so that needs ports 80 and 443 free of other web servers.
 
+### How many players
+
+Each match seats 8 (bots fill the empty seats). When every match is full, the next person starts a new match on the same server, and an extra match closes once it has sat empty for 30 seconds, so people play rather than watch. Watching only happens at the server's limit, `MAX_MATCHES` (default 25, so 200 players); the person watching gets the next seat that frees up in any match.
+
+The server barely works for it: players' games connect to each other directly where they can, and the server only relays the moves of those whose networks block that. Measured with every player relayed (`node server/load.mjs 240`, the worst case): 200 players in 25 matches took about a fifth of one CPU core and 110 MB of memory, sending about 4.7 MB/s. So the smallest droplet holds the default limit; `/health` shows the matches and the load.
+
 `deploy.sh` copies this checkout to the server, installs Node 22, builds the client (adding swap on 1 GB machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
 ### Free: Oracle Cloud Always Free
@@ -100,7 +106,7 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 
 | Path | What it is |
 | --- | --- |
-| `server/` | The always-on lobby: 8 seats (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). The match is endless; an empty lobby starts over after 30 s. Node + `ws`, and it serves the client too. |
+| `server/` | The always-on matches (`arcade.mjs` opens and closes them; `lobby.mjs` is one match): 8 seats each (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). Matches are endless; an empty one starts over after 30 s. Node + `ws`, and it serves the client too. |
 | `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`) and the endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up). |
 | `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in Chrome or Edge: in its own window, or headless, handing each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`) and turning the pane's input into the game's. The mod controls it over localhost behind a random token. `player/setup.mjs` finds or downloads the browser. |
 

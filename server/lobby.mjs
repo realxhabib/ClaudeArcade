@@ -22,14 +22,20 @@ const COUNTED_KEYS = 20_000;
 const seatId = (i) => `seat-${i}`;
 
 export class Lobby {
-  /** @param {{ now?: () => number }} [options] */
+  /**
+   * @param {{ now?: () => number, id?: number, nextSession?: () => number }} [options]
+   *   `id` numbers the match on its server; `nextSession` hands out session numbers unique across
+   *   the server's matches (each game is seeded from its session).
+   */
   constructor(options = {}) {
     this.now = options.now ?? Date.now;
+    this.id = options.id ?? 1;
+    this.nextSession = options.nextSession ?? (() => this.session + 1);
     /** @type {Array<{ conn: any, name: string } | null>} */
     this.seats = Array.from({ length: SEATS }, () => null);
     /** Connections watching without a seat (the lobby is full). */
     this.spectators = new Set();
-    this.session = 1;
+    this.session = options.nextSession ? options.nextSession() : 1;
     this.state = null;
     this.version = 0;
     this.emptySince = this.now();
@@ -62,6 +68,10 @@ export class Lobby {
     return this.scores.map((s, seat) => ({ seat, kills: s.kills, deaths: s.deaths }));
   }
 
+  hasFreeSeat() {
+    return this.seats.some((s) => s === null);
+  }
+
   connections() {
     return [...this.seats.filter(Boolean).map((s) => s.conn), ...this.spectators];
   }
@@ -85,6 +95,7 @@ export class Lobby {
     return {
       t: "welcome",
       you,
+      match: this.id,
       session: this.session,
       players: this.players(),
       online: this.online(),
@@ -173,7 +184,7 @@ export class Lobby {
   tick() {
     const empty = this.online().length === 0;
     if (empty && this.emptySince !== null && this.now() - this.emptySince > EMPTY_RESET_MS && this.state !== null) {
-      this.session += 1;
+      this.session = this.nextSession();
       this.state = null;
       this.version = 0;
       this.resetScores();
