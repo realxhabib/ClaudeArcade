@@ -292,12 +292,15 @@ async function captureLoop() {
   }
 }
 
-/** The game's numbers for the pane's status line, sent when they change. */
+/**
+ * The game's numbers for the pane's status line, sent when they change. Also marks the page alive
+ * (window.__arcadeAlive): a page that stops hearing from us leaves the match (client/src/main.tsx).
+ */
 async function hudLoop() {
   let last = "";
   while (!stopped) {
     try {
-      const { result } = await cdp("Runtime.evaluate", { expression: "JSON.stringify(window.__arcadeHud ? window.__arcadeHud() : null)", returnByValue: true }, session);
+      const { result } = await cdp("Runtime.evaluate", { expression: "(window.__arcadeAlive = Date.now(), JSON.stringify(window.__arcadeHud ? window.__arcadeHud() : null))", returnByValue: true }, session);
       const text = typeof result?.value === "string" ? result.value : "null";
       if (text !== last) {
         last = text;

@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.7'
+const VERSION = '0.4.8'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -317,7 +317,7 @@ async function runPlayer($: Engine) {
     return
   }
   // `pane`: the hidden browser painting the pane takes mouse look from the pane, not pointer lock.
-  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${game ? `&game=${game}` : ''}${windowed ? '' : '&pane=1'}`
+  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${game ? `&game=${game}` : ''}&managed=1${windowed ? '' : '&pane=1'}`
   status = windowed ? `Opening the game window as ${name}…` : `Joining the arcade as ${name}…`
   $.ui.invalidate('ui.render')
   playerWindowed = windowed

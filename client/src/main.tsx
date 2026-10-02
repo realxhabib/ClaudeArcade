@@ -53,11 +53,32 @@ function Arcade({ game }: { game: GameId }) {
     LobbyConnection.open(url).then(
       ({ lobby, welcome }) => {
         if (!live) return lobby.close();
+        let over = false;
         lobby.on("reseat", () => window.location.reload());
+        lobby.on("replaced", () => {
+          over = true;
+          setError("You're playing in another window now. You can close this one.");
+        });
         lobby.on("closed", () => {
+          if (over) return;
           setError("Lost the arcade server. Reconnecting…");
           setTimeout(() => window.location.reload(), 3000);
         });
+        // Opened by Claude Arcade (?managed): its player marks the page alive every few seconds. If that
+        // stops, the program running this window is gone (Claude Code closed or updated): leave the match
+        // rather than stay in it as a ghost nobody is playing.
+        if (params.has("managed")) {
+          const startedAt = Date.now();
+          const watch = setInterval(() => {
+            const alive = (window as unknown as { __arcadeAlive?: number }).__arcadeAlive;
+            const last = alive ?? startedAt;
+            if (Date.now() - last < (alive ? 20_000 : 60_000)) return;
+            clearInterval(watch);
+            over = true;
+            lobby.close();
+            setError("Claude Arcade stopped running this game. You can close this window.");
+          }, 5000);
+        }
         setJoined({ transport: startArcadeHost(lobby, welcome, game).transport });
       },
       (e: Error) => {

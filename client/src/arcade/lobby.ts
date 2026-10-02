@@ -33,6 +33,7 @@ type ServerMessage =
   | { t: "nack"; rid: number; code: string; message: string }
   | { t: "scores"; scores: ScoreRow[] }
   | { t: "reseat"; you: string | null }
+  | { t: "replaced" }
   | { t: "pong"; at: number | null };
 
 export interface LobbyEvents {
@@ -42,6 +43,8 @@ export interface LobbyEvents {
   scores: (scores: ScoreRow[]) => void;
   /** A seat freed up for us, here or in another match (we were watching): the game reloads into it. */
   reseat: () => void;
+  /** The same player connected again elsewhere (another window): this one is out, for good. */
+  replaced: () => void;
   closed: () => void;
 }
 
@@ -130,6 +133,9 @@ export class LobbyConnection {
         break;
       case "reseat":
         this.handlers.reseat?.();
+        break;
+      case "replaced":
+        this.handlers.replaced?.();
         break;
       default:
         break;

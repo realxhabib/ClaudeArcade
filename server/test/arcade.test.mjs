@@ -97,3 +97,25 @@ test("Frontline-style matches: a bot only keeps someone alone company", () => {
   for (const c of people.slice(1)) arcade.leave(c);
   assert.deepEqual(roster(), ["Ada@0", "bot@7"], "alone again: the bot is back");
 });
+
+test("the same name again replaces the older connection (a game window left running)", () => {
+  const arcade = new Arcade({ bots: "solo" });
+  const conn = () => {
+    const c = { seat: null, inbox: [], closed: false, send: (m) => c.inbox.push(m), close: () => (c.closed = true) };
+    return c;
+  };
+  const ghost = conn();
+  arcade.join(ghost, "IdleSoldier57");
+  const again = conn();
+  const w = arcade.join(again, "IdleSoldier57");
+  assert.equal(ghost.closed, true);
+  assert.deepEqual(ghost.inbox.at(-1), { t: "replaced" });
+  assert.deepEqual(arcade.lobbies[0].players().map((p) => (p.isBot ? "bot" : p.name)), ["IdleSoldier57", "bot"], "one of you, and the bot");
+  assert.equal(w.you, "seat-0");
+  // Made-up names (no name given) never replace each other.
+  const a = conn();
+  const b = conn();
+  arcade.join(a, "");
+  arcade.join(b, "");
+  assert.equal(a.closed || b.closed, false);
+});

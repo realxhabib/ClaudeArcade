@@ -105,6 +105,7 @@ function accept(ws, arcade, name) {
   const conn = {
     seat: null,
     name: null,
+    close: () => ws.close(4000, "replaced"),
     send: (msg) => {
       if (ws.readyState !== ws.OPEN) return;
       let text = encoded.get(msg);

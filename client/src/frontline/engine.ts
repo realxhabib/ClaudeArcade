@@ -154,6 +154,8 @@ export class Engine {
   private free = { x: 0, y: 14, z: 30, yaw: 0, pitch: -0.45 };
   private callouts = new Set<(c: Callout) => void>();
   private startedAt = 0;
+  /** "NPC" tags floating over the bots, by soldier id (made as bots appear). */
+  private npcTags = new Map<string, HTMLDivElement>();
 
   constructor(o: EngineOptions) {
     this.opts = o;
@@ -908,6 +910,8 @@ export class Engine {
       }
     }
 
+    this.updateNpcTags(me);
+
     // Compass: heading strip.
     if (o.compass) {
       const heading = -this.cameraYaw();
@@ -1017,8 +1021,47 @@ export class Engine {
     return performance.now() - this.startedAt;
   }
 
+  /** An "NPC" tag over each bot you can see, so nobody mistakes it for a person. */
+  private updateNpcTags(me: Soldier | null): void {
+    const g = this.game;
+    const cam = this.camera;
+    const from = { x: cam.position.x, y: cam.position.y, z: cam.position.z };
+    for (const s of g.soldiers) {
+      let tag = this.npcTags.get(s.id);
+      const show = s.isBot && !s.vacant && s !== me && g.targetable(s);
+      if (!show) {
+        if (tag) tag.style.opacity = "0";
+        continue;
+      }
+      const p = g.posOf(s);
+      const head = { x: p.x, y: p.y + (g.crouchOf(s) > 0.5 ? 1.45 : 2.05), z: p.z };
+      _v.set(head.x, head.y, head.z).project(cam);
+      const onScreen = _v.z > -1 && _v.z < 1 && Math.abs(_v.x) < 1.1 && Math.abs(_v.y) < 1.1;
+      // Only where you could see the bot itself: no tags through walls.
+      if (!onScreen || !lineOfSight(g.world, from, head, 0.1)) {
+        if (tag) tag.style.opacity = "0";
+        continue;
+      }
+      if (!tag) {
+        tag = document.createElement("div");
+        tag.textContent = "NPC";
+        tag.className =
+          "pointer-events-none absolute left-0 top-0 z-10 rounded-md bg-black/55 px-1.5 py-px text-[10px] font-black tracking-widest text-[#ffd166] ring-1 ring-[#ffd166]/50 transition-opacity duration-150";
+        this.opts.host.appendChild(tag);
+        this.npcTags.set(s.id, tag);
+      }
+      const dist = Math.hypot(head.x - from.x, head.y - from.y, head.z - from.z);
+      const x = ((_v.x + 1) / 2) * this.width;
+      const y = ((1 - _v.y) / 2) * this.height;
+      tag.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%) scale(${Math.max(0.7, Math.min(1.15, 14 / Math.max(1, dist))).toFixed(2)})`;
+      tag.style.opacity = "1";
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
+    for (const tag of this.npcTags.values()) tag.remove();
+    this.npcTags.clear();
     cancelAnimationFrame(this.raf);
     if (this.hiddenTimer) clearInterval(this.hiddenTimer);
     this.unvis?.();

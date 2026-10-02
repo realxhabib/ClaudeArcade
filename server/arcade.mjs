@@ -4,7 +4,7 @@
 // extra match closes once it has sat empty a while; match 1 always stays.
 // Watching only happens at the server's limit (`maxMatches`).
 
-import { EMPTY_RESET_MS, Lobby, SEATS } from "./lobby.mjs";
+import { EMPTY_RESET_MS, Lobby, SEATS, cleanName } from "./lobby.mjs";
 
 /** Matches a server runs at most, unless MAX_MATCHES says otherwise (README: "How many players"). */
 export const DEFAULT_MAX_MATCHES = 25;
@@ -30,6 +30,19 @@ export class Arcade {
 
   /** Seats `conn` in the busiest match with room, a new match if all are full, or watching at the limit. */
   join(conn, name) {
+    // One connection per name: the same person again (a game window left running, a reload) replaces
+    // their older connection rather than playing against themselves. Made-up names never match.
+    if (isGivenName(name)) {
+      const given = cleanName(name);
+      for (const l of this.lobbies) {
+        for (const old of l.connections()) {
+          if (old === conn || old.name !== given) continue;
+          old.send({ t: "replaced" });
+          this.leave(old);
+          old.close?.();
+        }
+      }
+    }
     const humans = (l) => l.online().length;
     let lobby = null;
     for (const l of this.lobbies) if (l.hasFreeSeat() && (!lobby || humans(l) > humans(lobby))) lobby = l;
@@ -79,4 +92,9 @@ export class Arcade {
       capacity: { matches: this.maxMatches, seats: this.maxMatches * SEATS },
     };
   }
+}
+
+/** A name the player chose (or their plugin picked), not one cleanName made up for them. */
+function isGivenName(raw) {
+  return String(raw ?? "").replace(/[^A-Za-z0-9_]/g, "").length >= 2;
 }
