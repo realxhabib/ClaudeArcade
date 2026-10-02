@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.6'
+const VERSION = '0.4.7'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -112,6 +112,8 @@ let hud: Hud | null = null
 let inputUrl: string | null = null
 /** The block picture's size as last drawn: a frame of another size needs a redraw, not a blit. */
 let drawn: { columns: number; rows: number } | null = null
+/** Where the game window was last left ("left,top,width,height"), so it opens there next time. */
+let windowBounds: string | null = null
 /** The block width the pane has room for, last told to the player. */
 let blockColumns = 160
 let imageDenies = 0
@@ -324,6 +326,7 @@ async function runPlayer($: Engine) {
       'node', `${$.plugin.root}/player/player.mjs`, '--chrome', chrome, '--url', url,
       '--view', windowed ? 'window' : view === 'blocks' ? 'cells' : 'pixels', '--columns', String(blockColumns),
       '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', view === 'blocks' ? '20' : '30',
+      ...(windowed && windowBounds ? ['--bounds', windowBounds] : []),
     ],
   }) as unknown as Stream
   player = stream
@@ -387,6 +390,10 @@ const isShowing = () => phase === 'playing' || phase === 'countdown'
 function onPlayerMessage($: Engine, msg: PlayerMessage) {
   if (typeof msg.input === 'string') {
     inputUrl = msg.input
+  } else if (typeof (msg as { bounds?: string }).bounds === 'string') {
+    // The person moved or resized the game window: it opens there from now on.
+    windowBounds = (msg as { bounds: string }).bounds
+    void $.store.set('windowBounds', windowBounds)
   } else if ((msg as { playing?: boolean }).playing) {
     // Play now, pressed in the window between turns: keep the game running until the next turn ends.
     warmTimer?.cancel()
@@ -510,6 +517,8 @@ export const register: Register = on => {
     if (savedName !== name) await $.store.set('name', name)
     const savedServer = await $.store.get('server')
     if (typeof savedServer === 'string' && savedServer) server = savedServer
+    const savedBounds = await $.store.get('windowBounds')
+    windowBounds = typeof savedBounds === 'string' && /^-?\d+,-?\d+,\d+,\d+$/.test(savedBounds) ? savedBounds : null
     const savedGame = await $.store.get('game')
     game = savedGame === 'frontline' || savedGame === 'rally' ? savedGame : null
     const savedView = await $.store.get('view')
@@ -602,15 +611,15 @@ export const register: Register = on => {
   })
 
   // Claude needs you (a permission prompt, a question): hand back at once.
-  on('tool.check', async ($, e, next) => {
-    const result = await next(e)
-    if (e.tool_use_id && result.decision === 'ask') {
-      if (phase === 'waiting') {
-        cancelTimer()
-        phase = 'idle'
-      } else await handBack($)
-    }
-    return result
+  // Claude needs you: a permission dialog is on screen. (Not tool.check's "ask": in auto or
+  // accept-edits mode most asks are settled without a dialog, and handing back on each bounced you
+  // out of the game and back in on every tool call.)
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (phase === 'waiting') {
+      cancelTimer()
+      phase = 'idle'
+    } else await handBack($)
+    return next(e)
   })
 
   on('tool.call', async ($, e, next) => {

@@ -24,7 +24,9 @@
 //     boolean, look: { dx, dy } (pixels of mouse movement since the last post) }
 //   POST <url>/view { view: "pixels" | "cells", columns } switches on the fly
 //     (headless only; a window stays a window).
-//   POST <url>/window { state: "normal" | "minimized" } shows or hides the window. Minimized, it
+//   POST <url>/window { state: "normal" | "minimized" } shows or hides the window. Shown the first
+//     time, it takes --bounds "left,top,width,height" or else the right half of the screen, so the
+//     terminal stays in view; moved or resized, it reports {"bounds":"l,t,w,h"} as it's put away. Minimized, it
 //     also leaves the game (a hidden page stops running, and other players would wait on it if it
 //     ran their bots); shown again, it rejoins where it was (the same game, not the menu).
 //   POST <url>/notice { text } shows a line over the game ("" clears it).
@@ -171,12 +173,39 @@ async function start() {
 
 /** Where the window was before it was put away, to rejoin there. */
 let awayFrom = null;
+/** Where the window goes when shown: --bounds, or (null) the right half of the screen, worked out once. */
+let bounds = parseBounds(args.bounds);
+let placed = false;
+
+function parseBounds(raw) {
+  const n = String(raw ?? "").split(",").map(Number);
+  return n.length === 4 && n.every(Number.isFinite) && n[2] >= 320 && n[3] >= 240 ? { left: n[0], top: n[1], width: n[2], height: n[3] } : null;
+}
+
+/** The right half of the screen's work area (not under the taskbar): the game beside the terminal. */
+async function rightHalf() {
+  const { result } = await cdp(
+    "Runtime.evaluate",
+    { expression: "JSON.stringify({ l: screen.availLeft || 0, t: screen.availTop || 0, w: screen.availWidth, h: screen.availHeight })", returnByValue: true },
+    session,
+  );
+  const s = JSON.parse(result.value);
+  const width = Math.max(640, Math.round(s.w / 2));
+  return { left: s.l + s.w - width, top: s.t, width, height: s.h };
+}
 
 /** Shows (and brings to the front) or minimizes the game window, leaving the game while it's away. */
 async function setWindow(state) {
   if (!WINDOWED || !target) return;
   const { windowId } = await cdp("Browser.getWindowForTarget", { targetId: target });
   if (state === "minimized") {
+    // Remember where the person left it (only if it's showing: a minimized window has no bounds to keep).
+    const now = await cdp("Browser.getWindowBounds", { windowId }).catch(() => null);
+    const b = now?.bounds;
+    if (placed && b && b.windowState === "normal" && (!bounds || b.left !== bounds.left || b.top !== bounds.top || b.width !== bounds.width || b.height !== bounds.height)) {
+      bounds = { left: b.left, top: b.top, width: b.width, height: b.height };
+      out({ bounds: `${b.left},${b.top},${b.width},${b.height}` });
+    }
     if (awayFrom === null) {
       const { result } = await cdp("Runtime.evaluate", { expression: "location.href", returnByValue: true }, session);
       awayFrom = typeof result?.value === "string" && result.value.startsWith("http") ? result.value : args.url;
@@ -186,6 +215,11 @@ async function setWindow(state) {
     return;
   }
   await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+  if (!placed) {
+    placed = true;
+    bounds ??= await rightHalf().catch(() => null);
+    if (bounds) await cdp("Browser.setWindowBounds", { windowId, bounds }).catch(() => {});
+  }
   if (awayFrom !== null) {
     const url = awayFrom;
     awayFrom = null;

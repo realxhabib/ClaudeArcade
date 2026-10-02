@@ -45,7 +45,7 @@ No Claude Code handy? Play in your browser at **https://174-138-34-59.sslip.io**
 
 ## Where the game shows
 
-- **A game window** (Windows, and the Claude desktop app): the game pops up in its own Chrome or Edge window when you drop in, at full quality with real mouse aim. It minimizes when Claude is done (a banner counts you down first) and comes back on the next turn. The pane beside the transcript keeps your health, ammo and score.
+- **A game window** (Windows, and the Claude desktop app): the game pops up in its own Chrome or Edge window when you drop in, at full quality with real mouse aim. It opens on the right half of the screen so the terminal stays in view; move or resize it and it opens there from then on. It minimizes when Claude is done (a banner counts you down first) and comes back on the next turn. The pane beside the transcript keeps your health, ammo and score.
 - **Pixels**, in the pane itself, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code (macOS and Linux).
 - **Blocks**, in the pane, the picture drawn with `▀` characters, each one two coloured pixels, in any terminal with true colour. Coarse: shrink the terminal's font (Ctrl or Cmd and minus) for a sharper picture. Health, ammo and the score are written under it.
 
