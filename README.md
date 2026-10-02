@@ -34,7 +34,7 @@ That's it. From now on, whenever Claude works for more than a couple of seconds 
 | `/arcade view window` | Where the game shows: `window`, `blocks`, `pixels` or `auto` (see below) |
 | `/arcade server <url>` | Plays on a different arcade server (`/arcade server` alone says which one, `/arcade server default` goes back) |
 
-No Claude Code handy? Play in your browser at **http://174.138.34.59:8787**: same games, same players.
+No Claude Code handy? Play in your browser at **https://174-138-34-59.sslip.io**: same games, same players.
 
 **If something's off**
 
@@ -85,7 +85,7 @@ In the pane, terminals report key presses but not releases, so a key counts as h
 
 ## What it connects to
 
-The game connects to the Claude Arcade server at `http://174.138.34.59:8787` (or the one you set with `/arcade server <url>`), under a random name such as `QueuedSoldier42`. Nothing about your session, project or Claude's work is sent. Between turns it stays in the lobby for 90 seconds so the next turn drops straight back in, then it disconnects.
+The game connects to the Claude Arcade server at `https://174-138-34-59.sslip.io` (or the one you set with `/arcade server <url>`), under a random name such as `QueuedSoldier42`. Nothing about your session, project or Claude's work is sent. Between turns it stays in the lobby for 90 seconds so the next turn drops straight back in, then it disconnects.
 
 ## Hosting the server
 
