@@ -1,0 +1,7 @@
+{
+  "name": "claudearcade-server",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node index.mjs", "test": "node --test" },
+  "dependencies": { "ws": "^8.18.0" }
+}

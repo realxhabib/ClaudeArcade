@@ -1,0 +1,7 @@
+node_modules/
+dist/
+plugin/dist/
+plugin/.claude-plugin/types/
+plugin/tsconfig.json
+*.log
+.DS_Store

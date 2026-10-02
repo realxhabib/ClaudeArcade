@@ -1,0 +1,16 @@
+[Unit]
+Description=Claude Arcade server (Frontline lobby)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=claudearcade
+WorkingDirectory=/opt/claudearcade/server
+Environment=PORT=8787
+Environment=CLIENT_DIR=/opt/claudearcade/client/dist
+ExecStart=/usr/bin/node /opt/claudearcade/server/index.mjs
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

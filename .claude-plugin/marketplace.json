@@ -1,0 +1,6 @@
+{
+  "name": "claudearcade",
+  "description": "Games to play while Claude works",
+  "owner": { "name": "realxhabib" },
+  "plugins": [{ "name": "claudearcade", "source": "./plugin" }]
+}

@@ -1,0 +1,380 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------- */
+/* Design tokens                                                          */
+/* ---------------------------------------------------------------------- */
+
+@theme {
+  /* Ink: blue-tinted neutrals, darkest first used for canvas */
+  --color-ink-950: #05060a;
+  --color-ink-900: #090b11;
+  --color-ink-850: #0d1018;
+  --color-ink-800: #12151f;
+  --color-ink-750: #171b27;
+  --color-ink-700: #1d2231;
+  --color-ink-600: #2a3044;
+  --color-ink-500: #3d4560;
+  --color-ink-400: #5f6883;
+  --color-ink-300: #8d96ad;
+  --color-ink-200: #b8bfcf;
+  --color-ink-100: #e1e5ee;
+  --color-ink-50: #f6f7fb;
+
+  /* Brand */
+  --color-nova-300: #a9b8ff;
+  --color-nova-400: #7f95ff;
+  --color-nova-500: #5b74ff;
+  --color-nova-600: #4453e6;
+  --color-violet-glow: #a35cff;
+  --color-flare: #ff5ca8;
+  --color-volt: #c6ff3d;
+  --color-ember: #ff8a3d;
+  --color-gold: #ffc93d;
+  --color-danger: #ff4d5e;
+  --color-success: #37e39b;
+  --color-x-blue: #1d9bf0;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-4xl: 2rem;
+  --radius-5xl: 2.5rem;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in-expo: cubic-bezier(0.7, 0, 0.84, 0);
+  /* A springy curve for CSS-only transitions (stiffness ~300, damping ~20). */
+  --ease-spring: linear(
+    0, 0.009, 0.035 2.1%, 0.141, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%, 1.017,
+    1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%,
+    1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%,
+    0.997 69.8%, 1.003 76.9%, 1.004 83.8%, 1
+  );
+
+  --animate-aurora: aurora 18s ease-in-out infinite alternate;
+  --animate-marquee: marquee var(--marquee-duration, 40s) linear infinite;
+  --animate-shimmer: shimmer 2.4s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-spin-slow: spin 18s linear infinite;
+  --animate-ping-soft: ping-soft 2.2s var(--ease-out-expo) infinite;
+  --animate-radar: radar 2.4s linear infinite;
+  --animate-gradient: gradient-pan 8s ease-in-out infinite alternate;
+
+  @keyframes aurora {
+    0% {
+      transform: translate3d(-8%, -4%, 0) rotate(0deg) scale(1);
+    }
+    50% {
+      transform: translate3d(6%, 6%, 0) rotate(12deg) scale(1.15);
+    }
+    100% {
+      transform: translate3d(-4%, 8%, 0) rotate(-8deg) scale(0.95);
+    }
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+  @keyframes ping-soft {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    100% {
+      transform: scale(2.4);
+      opacity: 0;
+    }
+  }
+  @keyframes radar {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes gradient-pan {
+    0% {
+      background-position: 0% 50%;
+    }
+    100% {
+      background-position: 100% 50%;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base                                                                   */
+/* ---------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --page-gutter: 1rem;
+  }
+  @media (min-width: 640px) {
+    :root {
+      --page-gutter: 1.5rem;
+    }
+  }
+
+  html {
+    background: var(--color-ink-950);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    color: var(--color-ink-50);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    text-rendering: optimizeLegibility;
+    overflow-x: clip;
+  }
+
+  /* Full-screen app hosts (/play, /apps/<slug>/open): a drag inside the app must
+     never become pull-to-refresh or a rubber-band bounce of the host page. */
+  html:has([data-app-host]),
+  html:has([data-app-host]) body {
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-nova-500) 55%, transparent);
+    color: white;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-nova-400);
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Thin, quiet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Utilities                                                              */
+/* ---------------------------------------------------------------------- */
+
+@utility glass {
+  background: color-mix(in oklab, var(--color-ink-800) 62%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+}
+
+@utility glass-strong {
+  background: color-mix(in oklab, var(--color-ink-850) 82%, transparent);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.1);
+}
+
+@utility hairline {
+  border: 1px solid rgb(255 255 255 / 0.07);
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(100deg, #fff 10%, var(--color-nova-300) 45%, var(--color-flare) 90%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility text-balance-pretty {
+  text-wrap: balance;
+}
+
+@utility shimmer-bg {
+  background-image: linear-gradient(
+    90deg,
+    rgb(255 255 255 / 0.03) 0%,
+    rgb(255 255 255 / 0.09) 40%,
+    rgb(255 255 255 / 0.03) 80%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+@utility mask-fade-x {
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+@utility mask-fade-b {
+  mask-image: linear-gradient(180deg, #000 60%, transparent);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility page-x {
+  padding-inline: var(--page-gutter);
+}
+
+/* Film grain overlay, applied once on the body background */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* ---------------------------------------------------------------------- */
+/* View transitions (React <ViewTransition> + App Router navigations)      */
+/* ---------------------------------------------------------------------- */
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(.morph) {
+  animation-duration: 520ms;
+  animation-timing-function: cubic-bezier(0.2, 0.9, 0.1, 1);
+}
+::view-transition-image-pair(.morph) {
+  animation-name: vt-via-blur;
+}
+@keyframes vt-via-blur {
+  35% {
+    filter: blur(4px);
+  }
+}
+
+::view-transition-old(.nav-forward) {
+  --vt-offset: -48px;
+  animation:
+    160ms ease-in both vt-fade reverse,
+    420ms var(--ease-out-expo) both vt-slide reverse;
+}
+::view-transition-new(.nav-forward) {
+  --vt-offset: 48px;
+  animation:
+    240ms ease-out 120ms both vt-fade,
+    520ms var(--ease-out-expo) both vt-slide;
+}
+::view-transition-old(.nav-back) {
+  --vt-offset: 48px;
+  animation:
+    160ms ease-in both vt-fade reverse,
+    420ms var(--ease-out-expo) both vt-slide reverse;
+}
+::view-transition-new(.nav-back) {
+  --vt-offset: -48px;
+  animation:
+    240ms ease-out 120ms both vt-fade,
+    520ms var(--ease-out-expo) both vt-slide;
+}
+::view-transition-old(.page-fade) {
+  animation: 180ms ease-in both vt-fade reverse;
+}
+::view-transition-new(.page-fade) {
+  animation: 320ms var(--ease-out-expo) 80ms both vt-rise;
+}
+
+@keyframes vt-fade {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+@keyframes vt-slide {
+  from {
+    translate: var(--vt-offset) 0;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+@keyframes vt-rise {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    filter: blur(0);
+  }
+}
+
+/* The chrome stays put while pages move beneath it */
+::view-transition-group(site-header),
+::view-transition-group(site-dock) {
+  animation: none;
+  z-index: 100;
+}
+::view-transition-old(site-header),
+::view-transition-old(site-dock) {
+  display: none;
+}
+::view-transition-new(site-header),
+::view-transition-new(site-dock) {
+  animation: none;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Reduced motion                                                         */
+/* ---------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
