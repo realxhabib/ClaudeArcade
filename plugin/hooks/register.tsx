@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.5'
+const VERSION = '0.4.6'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -387,9 +387,15 @@ const isShowing = () => phase === 'playing' || phase === 'countdown'
 function onPlayerMessage($: Engine, msg: PlayerMessage) {
   if (typeof msg.input === 'string') {
     inputUrl = msg.input
+  } else if ((msg as { playing?: boolean }).playing) {
+    // Play now, pressed in the window between turns: keep the game running until the next turn ends.
+    warmTimer?.cancel()
+    warmTimer = null
   } else if ((msg as { ready?: boolean }).ready && playerWindowed) {
     status = null
     $.ui.invalidate('ui.render')
+    // The window loads out of sight: show it if Claude is still working, else it waits for the next turn.
+    void postToPlayer($, 'window', { state: isShowing() ? 'normal' : 'minimized' })
   } else if (msg.frame && typeof msg.gen === 'number') {
     if (view !== 'pixels') return
     const first = !frame

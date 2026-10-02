@@ -17,6 +17,7 @@
 //   first, {"ready":true} once the page loaded, per frame
 //   {"frame":"<path>","gen":n} or {"cells":"<base64>","columns","rows","gen"},
 //   {"hud":{...}} when the game's numbers change (src/frontline/status.ts),
+//   {"playing":true} when someone presses Play now on the window's away page,
 //   {"error":"..."} on trouble.
 // Input: HTTP on localhost, behind the printed URL's random token:
 //   POST <url>/input { keys: string[] (KeyboardEvent.code held), fire, aim:
@@ -149,10 +150,17 @@ async function start() {
   void hudLoop();
   // The app window opened on the game already.
   if (WINDOWED) {
+    // Out of sight until the mod shows it (/window normal once the game has loaded, if Claude is
+    // still working by then): no window flashing up for a turn that's already over.
+    const { windowId } = await cdp("Browser.getWindowForTarget", { targetId });
+    await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } }).catch(() => {});
+    // Someone pressing Play now on the away page is back in the game.
+    listeners.set("Page.frameNavigated", (params) => {
+      if (params?.frame?.parentId || !/^https?:/.test(params?.frame?.url ?? "") || awayFrom === null) return;
+      awayFrom = null;
+      out({ playing: true });
+    });
     out({ ready: true });
-    // The window opens behind whatever has focus on Windows: lift it once it exists (and again in
-    // case the first try came before it did).
-    void raiseWindow(chrome.pid).then((n) => (n ? undefined : sleep(1500).then(() => raiseWindow(chrome.pid))));
     return;
   }
   await cdp("Page.navigate", { url: args.url }, session);
@@ -172,7 +180,7 @@ async function setWindow(state) {
     if (awayFrom === null) {
       const { result } = await cdp("Runtime.evaluate", { expression: "location.href", returnByValue: true }, session);
       awayFrom = typeof result?.value === "string" && result.value.startsWith("http") ? result.value : args.url;
-      await cdp("Page.navigate", { url: "about:blank" }, session);
+      await cdp("Page.navigate", { url: awayPage(awayFrom) }, session);
     }
     await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } });
     return;
@@ -186,6 +194,25 @@ async function setWindow(state) {
   await cdp("Page.bringToFront", {}, session);
   // Chrome's bringToFront can't get past Windows' foreground lock from the background.
   await raiseWindow(chrome.pid);
+}
+
+/** What the window shows between turns (it has left the game): when it's back, and a way back now. */
+function awayPage(back) {
+  const html = `<!doctype html><meta charset="utf-8"><title>Claude Arcade</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: radial-gradient(ellipse at top, #2a1a4a, #0b0814 70%); color: #fff;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+  .kicker { font-size: 12px; letter-spacing: .35em; text-transform: uppercase; opacity: .6; }
+  h1 { margin: 8px 0 4px; font-size: 32px; }
+  p { margin: 0 0 22px; opacity: .75; }
+  a { display: inline-block; padding: 12px 26px; border-radius: 14px; color: #1a0e00; font-weight: 800; text-decoration: none;
+    background: linear-gradient(180deg, #f2b544, #e2553a); }
+</style>
+<div><div class="kicker">Claude Arcade</div><h1>Back to Claude</h1>
+<p>The game comes back the next time Claude is working.</p>
+<a href="${back.replace(/"/g, "&quot;")}">Play now</a></div>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 async function notice(text) {
