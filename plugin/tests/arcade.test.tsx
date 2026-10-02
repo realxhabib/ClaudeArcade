@@ -33,7 +33,7 @@ describe('claudearcade', () => {
     // Asked again with no URL, it reports the one it now joins.
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'server' }))).toContain('Arcade server: https://arcade.test')
     // And back to the built-in one.
-    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'server default' }))).toContain('back to the default, http://174.138.34.59:8787')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'server default' }))).toContain('back to the default, https://174-138-34-59.sslip.io')
   })
 
   test('terminal keys map to the game keys', () => {
@@ -96,7 +96,7 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.4.3 is on')
+    expect(reply).toContain('Claude Arcade 0.4.4 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()

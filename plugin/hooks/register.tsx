@@ -20,12 +20,12 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.3'
+const VERSION = '0.4.4'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
  */
-const DEFAULT_SERVER = 'http://174.138.34.59:8787'
+const DEFAULT_SERVER = 'https://174-138-34-59.sslip.io'
 const WIDTH = 640
 const HEIGHT = 360
 const DROP_IN_DELAY_MS = 2000
