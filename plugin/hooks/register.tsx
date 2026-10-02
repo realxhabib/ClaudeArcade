@@ -18,6 +18,8 @@ type Engine = EngineInterface
 
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade · Frontline'
+/** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
+const VERSION = '0.3.1'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -273,6 +275,12 @@ async function runPlayer($: Engine) {
     $.ui.invalidate('ui.render')
     return
   }
+  const problem = await checkServer($)
+  if (problem) {
+    status = problem
+    $.ui.invalidate('ui.render')
+    return
+  }
   const chrome = await setup($)
   if (!chrome || phase === 'idle') {
     $.ui.invalidate('ui.render')
@@ -325,6 +333,20 @@ async function runPlayer($: Engine) {
       $.ui.invalidate('ui.render')
     }
   }
+}
+
+/** Why the server set can't be played on (down, or some other site), or null when it's an arcade server. */
+async function checkServer($: Engine): Promise<string | null> {
+  const base = server.replace(/\/$/, '')
+  try {
+    const res = await $.http.fetch(`${base}/health`)
+    const health = JSON.parse(res.text) as { ok?: unknown; players?: unknown }
+    if (health.ok === true && Array.isArray(health.players)) return null
+  } catch (error) {
+    const reason = String(error instanceof Error ? error.message : error)
+    if (!/JSON|Unexpected|token/i.test(reason)) return `Can't reach the arcade server at ${base} (${reason}). Is it running? /arcade server <url> changes it.`
+  }
+  return `${base} isn't a Claude Arcade server. Set the address of yours: /arcade server http://<server-ip>:8787 (README, “Hosting the server”).`
 }
 
 type PlayerMessage = {
@@ -484,7 +506,7 @@ export const register: Register = on => {
     adoptView(next)
     const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
     if (opened.isPlaced) await startPlaying($)
-    return { text: `Claude Arcade is on: you drop into Frontline as ${name} while Claude works. /arcade off turns it off.` }
+    return { text: `Claude Arcade ${VERSION} is on: you drop into Frontline as ${name} while Claude works, shown as ${view === 'window' ? 'a game window' : view}, on ${server || 'no server yet'}. /arcade off turns it off.` }
   })
 
   on('turn.start', async ($, e, next) => {

@@ -1,7 +1,7 @@
 {
   "name": "claudearcade",
   "displayName": "Claude Arcade",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Play Frontline deathmatch with everyone waiting on Claude, and get handed back when it's done",
   "homepage": "https://github.com/realxhabib/ClaudeArcade",
   "repository": "https://github.com/realxhabib/ClaudeArcade",
