@@ -4,6 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh
 # or, for HTTPS on a domain pointing at the server,
 #   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh -s arcade.example.com
+# and, when the server already runs something on port 8787, another port:
+#   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | PORT=8788 sh
 # Re-run it to update. Then the same build and service as deploy.sh (setup.sh).
 set -eu
 

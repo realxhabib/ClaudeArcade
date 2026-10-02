@@ -1,10 +1,16 @@
 #!/bin/sh
 # Runs on the server as root (via sudo), from deploy.sh: installs Node, builds
 # the Frontline client, and (re)starts the arcade server as a service. Safe to rerun.
+# PORT (default 8787) picks the port, for a server that already runs something on 8787.
 set -eu
 
 DOMAIN="${1:-}"
+PORT="${PORT:-8787}"
 APP=/opt/claudearcade
+
+case "$PORT" in
+	''|*[!0-9]*) echo "PORT must be a number, not '$PORT'." >&2; exit 1 ;;
+esac
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
 	apt-get update -q
@@ -33,7 +39,7 @@ chown -R claudearcade "$APP"
 # Oracle Cloud's Ubuntu images block every port but SSH in iptables (on top of the
 # console's security list): let the arcade's ports in.
 if command -v iptables >/dev/null && iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
-	for port in 8787 80 443; do
+	for port in "$PORT" 80 443; do
 		if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
 			# Just above the catch-all REJECT, so the rule is reached.
 			at=$(iptables -L INPUT --line-numbers -n | awk '/REJECT/ {print $1; exit}')
@@ -43,7 +49,20 @@ if command -v iptables >/dev/null && iptables -S INPUT 2>/dev/null | grep -q -- 
 	command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
 fi
 
-install -m 644 /tmp/claudearcade.service /etc/systemd/system/
+# DigitalOcean's images ship ufw off, but if it was turned on, let the arcade's port in.
+if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: active'; then
+	ufw allow "$PORT/tcp" >/dev/null
+fi
+
+# Something else (another app on this server) on the port? Say so rather than fail quietly.
+systemctl stop claudearcade 2>/dev/null || true
+if ! node -e "require('net').createServer().once('error', () => process.exit(1)).listen($PORT, () => process.exit(0))"; then
+	echo "Port $PORT is already used by another program on this server. Run this again with another port, e.g. PORT=8788." >&2
+	exit 1
+fi
+
+sed "s/^Environment=PORT=.*/Environment=PORT=$PORT/" /tmp/claudearcade.service > /etc/systemd/system/claudearcade.service
+chmod 644 /etc/systemd/system/claudearcade.service
 systemctl daemon-reload
 systemctl enable -q claudearcade
 systemctl restart claudearcade
@@ -57,11 +76,19 @@ if [ -n "$DOMAIN" ]; then
 		apt-get update -q
 		apt-get install -yq caddy
 	fi
-	printf '%s {\n\treverse_proxy 127.0.0.1:8787\n}\n' "$DOMAIN" > /etc/caddy/Caddyfile
+	# Keep any other sites in the Caddyfile (not Caddy's stock placeholder): replace only this domain's block.
+	CADDYFILE=/etc/caddy/Caddyfile
+	if [ -f "$CADDYFILE" ] && ! grep -q '/usr/share/caddy' "$CADDYFILE"; then
+		awk -v site="$DOMAIN {" '$0 == site { skip = 1; next } skip && $0 == "}" { skip = 0; next } !skip' "$CADDYFILE" > "$CADDYFILE.new"
+	else
+		: > "$CADDYFILE.new"
+	fi
+	printf '%s {\n\treverse_proxy 127.0.0.1:%s\n}\n' "$DOMAIN" "$PORT" >> "$CADDYFILE.new"
+	mv "$CADDYFILE.new" "$CADDYFILE"
 	systemctl reload caddy || systemctl restart caddy
 	echo "Claude Arcade: https://$DOMAIN"
 else
-	echo "Claude Arcade: http://$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | cut -d' ' -f1):8787"
+	echo "Claude Arcade: http://$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | cut -d' ' -f1):$PORT"
 fi
 sleep 2
 systemctl --no-pager --lines=5 status claudearcade

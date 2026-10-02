@@ -82,6 +82,8 @@ curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server
 
 which clones this repo on the server and does the same build. Add ` -s arcade.example.com` after `sh` for HTTPS.
 
+Already running something else on the server? The arcade can share it: it only needs a port of its own. If something already uses 8787 there, pick another, `PORT=8788 ./deploy.sh root@<droplet-ip>` or `curl … | PORT=8788 sh`, and use `http://<droplet-ip>:8788` as the address. (The installer stops and says so if the port is taken.) With a domain it adds the arcade to Caddy alongside any sites already there, so that needs ports 80 and 443 free of other web servers.
+
 `deploy.sh` copies this checkout to the server, installs Node 22, builds the client (adding swap on 1 GB machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
 ### Free: Oracle Cloud Always Free
