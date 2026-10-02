@@ -58,14 +58,25 @@ The game connects to the Claude Arcade server you set with `/arcade server <url>
 
 Like intermission's Doom server, the arcade needs one always-on server that owns the lobby. It holds the seats, the shared match document (kills, the clock) and the round rotation, and relays everyone's packets. Players' games simulate their own soldiers, and one of them drives the bots, exactly as Frontline does on XApps.
 
-A $6–12/month droplet is plenty. On a fresh Ubuntu droplet:
+The server only seats players and relays their moves (each player's own machine renders the game), so the smallest server anywhere is plenty: a $6/month DigitalOcean droplet, or an Oracle Cloud Always Free VM at no cost (see below). On a fresh Ubuntu server:
 
 ```sh
-./deploy.sh root@<droplet-ip>                  # serves http://<droplet-ip>:8787
-./deploy.sh root@<droplet-ip> arcade.example.com   # HTTPS via Caddy (point the domain's A record at the droplet first)
+./deploy.sh root@<droplet-ip>                      # DigitalOcean: serves http://<droplet-ip>:8787
+./deploy.sh ubuntu@<oracle-vm-ip>                  # Oracle Cloud
+./deploy.sh root@<droplet-ip> arcade.example.com   # HTTPS via Caddy (point the domain's A record at the server first)
 ```
 
-`deploy.sh` copies this checkout to the droplet, installs Node 22, builds the client, and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update. Then set the address in `plugin/hooks/register.tsx` (`DEFAULT_SERVER`) so everyone joins it by default, or tell people to run `/arcade server <url>`.
+`deploy.sh` copies this checkout to the server, installs Node 22, builds the client (adding swap on 1 GB machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
+
+### Free: Oracle Cloud Always Free
+
+1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). It asks for a card to verify you; Always Free resources aren't charged. The home region you pick is permanent.
+2. **Compute → Instances → Create instance.** Image: **Canonical Ubuntu** (22.04 or 24.04). Shape: an *Always Free-eligible* one, **VM.Standard.A1.Flex** (Ampere, give it 1 OCPU and 6 GB) or, if that says out of capacity, **VM.Standard.E2.1.Micro**. Under *Add SSH keys*, paste your public key (`cat ~/.ssh/id_ed25519.pub`; `ssh-keygen -t ed25519` makes one). Create, and copy the instance's **public IP**.
+3. Open the port in Oracle's firewall: on the instance, **Subnet → Security List → Add Ingress Rules**: source `0.0.0.0/0`, TCP, destination port `8787` (and `80,443` if you'll use a domain).
+4. From this repo: `./deploy.sh ubuntu@<public-ip>`. It also opens the ports in the VM's own firewall (Oracle's images block them).
+5. Check `http://<public-ip>:8787/health`, then `/arcade server http://<public-ip>:8787` in Claude Code.
+
+Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading the account to Pay As You Go (still free within the Always Free limits) avoids that. Then set the address in `plugin/hooks/register.tsx` (`DEFAULT_SERVER`) so everyone joins it by default, or tell people to run `/arcade server <url>`.
 
 ## How it works
 

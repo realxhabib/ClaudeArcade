@@ -1,6 +1,6 @@
 #!/bin/sh
-# Runs on the droplet as root, from deploy.sh: installs Node, builds the
-# Frontline client, and (re)starts the arcade server as a service. Safe to rerun.
+# Runs on the server as root (via sudo), from deploy.sh: installs Node, builds
+# the Frontline client, and (re)starts the arcade server as a service. Safe to rerun.
 set -eu
 
 DOMAIN="${1:-}"
@@ -13,6 +13,12 @@ if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split("."
 	apt-get install -yq nodejs
 fi
 
+# Small servers (1 GB: Oracle's E2.1.Micro, the cheapest droplets) need swap to build the client.
+if [ ! -f /swapfile ] && [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ]; then
+	fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile
+	echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 id claudearcade >/dev/null 2>&1 || useradd --system --home-dir "$APP" --shell /usr/sbin/nologin claudearcade
 rm -rf "$APP.new"
 install -d "$APP.new"
@@ -23,6 +29,19 @@ rm -rf "$APP.old"
 [ -d "$APP" ] && mv "$APP" "$APP.old"
 mv "$APP.new" "$APP"
 chown -R claudearcade "$APP"
+
+# Oracle Cloud's Ubuntu images block every port but SSH in iptables (on top of the
+# console's security list): let the arcade's ports in.
+if command -v iptables >/dev/null && iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
+	for port in 8787 80 443; do
+		if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+			# Just above the catch-all REJECT, so the rule is reached.
+			at=$(iptables -L INPUT --line-numbers -n | awk '/REJECT/ {print $1; exit}')
+			iptables -I INPUT "${at:-1}" -p tcp --dport "$port" -j ACCEPT
+		fi
+	done
+	command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
+fi
 
 install -m 644 /tmp/claudearcade.service /etc/systemd/system/
 systemctl daemon-reload
