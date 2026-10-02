@@ -20,7 +20,19 @@ fi
 command -v git >/dev/null || { apt-get update -q && apt-get install -yq git; }
 rm -rf "$SRC"
 git clone -q --depth 1 "$REPO" "$SRC"
-tar -C "$SRC" --exclude=node_modules --exclude=dist -czf /tmp/claudearcade.tgz client server
+# The game client, built once by GitHub Actions (.github/workflows/client.yml), when it was built
+# from exactly this client source; otherwise setup.sh builds it here.
+TREE=$(git -C "$SRC" rev-parse HEAD:client)
+if curl -fsSL "$REPO/releases/download/client-latest/client-dist.tgz" -o /tmp/claudearcade-client.tgz 2>/dev/null \
+	&& tar -xzf /tmp/claudearcade-client.tgz -C "$SRC/client" \
+	&& [ "$(cat "$SRC/client/dist/.client-tree" 2>/dev/null)" = "$TREE" ]; then
+	echo "Using the prebuilt game client."
+else
+	echo "No prebuilt game client for this version yet: building it here."
+	rm -rf "$SRC/client/dist"
+fi
+rm -f /tmp/claudearcade-client.tgz
+tar -C "$SRC" --exclude=node_modules -czf /tmp/claudearcade.tgz client server
 cp "$SRC/server/claudearcade.service" /tmp/
 sh "$SRC/server/setup.sh" "$DOMAIN"
 rm -rf "$SRC"

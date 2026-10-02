@@ -1,0 +1,44 @@
+# Builds the game client once here, so servers download it instead of building it (server/install.sh).
+# The bundle names the client source it was built from (the git tree of client/), and the installer
+# only takes it when that matches the code it fetched; otherwise it builds on the server as before.
+name: client
+
+on:
+  push:
+    branches: [main]
+    paths: [client/**, .github/workflows/client.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: client-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: client
+      - run: npm test
+        working-directory: client
+      - run: npm run build
+        working-directory: client
+      - name: Package
+        run: |
+          git rev-parse HEAD:client > client/dist/.client-tree
+          tar -C client -czf client-dist.tgz dist
+      - name: Publish to the client-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view client-latest >/dev/null 2>&1 || gh release create client-latest --title "Game client (latest build)" --notes "Built by .github/workflows/client.yml; server/install.sh downloads it." --latest=false
+          gh release upload client-latest client-dist.tgz --clobber

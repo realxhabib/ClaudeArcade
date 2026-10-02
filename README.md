@@ -80,7 +80,7 @@ No terminal tools (Windows, say)? Skip `deploy.sh`: open the server's web consol
 curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh
 ```
 
-which clones this repo on the server and does the same build. Add ` -s arcade.example.com` after `sh` for HTTPS.
+which clones this repo on the server and installs it. It downloads the game client prebuilt by GitHub Actions (`.github/workflows/client.yml`), so the server builds nothing, unless that build is behind the code, in which case it builds it there. Add ` -s arcade.example.com` after `sh` for HTTPS.
 
 Already running something else on the server? The arcade can share it: it only needs a port of its own. If something already uses 8787 there, pick another, `PORT=8788 ./deploy.sh root@<droplet-ip>` or `curl … | PORT=8788 sh`, and use `http://<droplet-ip>:8788` as the address. (The installer stops and says so if the port is taken.) With a domain it adds the arcade to Caddy alongside any sites already there, so that needs ports 80 and 443 free of other web servers.
 
@@ -90,7 +90,7 @@ Each match seats 8 (bots fill the empty seats). When every match is full, the ne
 
 The server barely works for it: players' games connect to each other directly where they can, and the server only relays the moves of those whose networks block that. Measured with every player relayed (`node server/load.mjs 240`, the worst case): 200 players in 25 matches took about a fifth of one CPU core and 110 MB of memory, sending about 4.7 MB/s. So the smallest droplet holds the default limit; `/health` shows the matches and the load.
 
-`deploy.sh` copies this checkout to the server, installs Node 22, builds the client (adding swap on 1 GB machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
+`deploy.sh` copies this checkout to the server, installs Node 22, builds the client there (adding swap on small machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
 ### Free: Oracle Cloud Always Free
 

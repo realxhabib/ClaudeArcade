@@ -19,17 +19,19 @@ if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split("."
 	apt-get install -yq nodejs
 fi
 
-# Small servers (1 GB: Oracle's E2.1.Micro, the cheapest droplets) need swap to build the client.
-if [ ! -f /swapfile ] && [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ]; then
-	fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile
-	echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fi
-
 id claudearcade >/dev/null 2>&1 || useradd --system --home-dir "$APP" --shell /usr/sbin/nologin claudearcade
 rm -rf "$APP.new"
 install -d "$APP.new"
 tar -xzf /tmp/claudearcade.tgz -C "$APP.new"
-(cd "$APP.new/client" && npm ci --no-audit --no-fund && npm run build)
+# The client comes prebuilt from install.sh when it can; otherwise build it here.
+if [ ! -f "$APP.new/client/dist/index.html" ]; then
+	# Small servers (512 MB to 1 GB: the cheapest droplets, Oracle's E2.1.Micro) need swap to build it.
+	if [ ! -f /swapfile ] && [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 2000000 ]; then
+		fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile && swapon /swapfile
+		echo '/swapfile none swap sw 0 0' >> /etc/fstab
+	fi
+	(cd "$APP.new/client" && npm ci --no-audit --no-fund && npm run build)
+fi
 (cd "$APP.new/server" && npm ci --omit=dev --no-audit --no-fund)
 rm -rf "$APP.old"
 [ -d "$APP" ] && mv "$APP" "$APP.old"
