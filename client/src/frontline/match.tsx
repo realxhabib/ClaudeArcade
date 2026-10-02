@@ -38,10 +38,6 @@ export function isArcade(xapps: XAppsClient): boolean {
   return xapps.match.settings?.arcade === true;
 }
 
-function arcadeRoundMs(xapps: XAppsClient): number {
-  const ms = xapps.match.settings?.roundMs;
-  return typeof ms === "number" && ms > 30_000 ? ms : 5 * 60_000;
-}
 
 function seatsOf(players: PlayerInfo[]): SeatInfo[] {
   return players.map((p) => ({ id: p.id, seat: p.seat, name: p.name, handle: p.handle, isBot: p.isBot, avatarUrl: p.avatarUrl }));
@@ -106,7 +102,7 @@ function createGame(xapps: XAppsClient, players: PlayerInfo[], me: PlayerInfo, s
       update: (fn) => xapps.state.update((raw) => fn(raw) as unknown as Json | undefined, { retries: 12 }),
     },
     initialState: xapps.state.current,
-    docOverrides: isArcade(xapps) ? { dur: arcadeRoundMs(xapps) } : debugOverrides(),
+    docOverrides: isArcade(xapps) ? { endless: true } : debugOverrides(),
   });
 }
 
@@ -273,6 +269,10 @@ export function MatchView({ settings, onSettings }: { settings: Settings; onSett
   useEffect(() => {
     if (isArcade(xapps)) game.setSeats(seatsOf(players));
   }, [game, players, xapps]);
+  // The arcade server keeps the score (per seat, since its current occupant arrived).
+  useRoomEvent<{ seat: number; kills: number; deaths: number }[]>("arcade.scores", (rows) => {
+    if (Array.isArray(rows)) game.setArcadeScores(rows);
+  });
   useEffect(() => xapps.state.onChange((s) => game.onDoc(s)), [game, xapps]);
   // Catch up on the state in case a change landed before we subscribed.
   useEffect(() => {

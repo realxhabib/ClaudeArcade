@@ -8,14 +8,18 @@ import type { Json, PlayerInfo } from "@xapps/sdk";
 
 export type LobbyPlayer = Pick<PlayerInfo, "id" | "seat" | "name" | "handle" | "avatarUrl" | "isBot">;
 
+export type ScoreRow = { seat: number; kills: number; deaths: number };
+
 export interface Welcome {
   you: string | null;
-  round: number;
+  /** Bumps when an empty lobby starts over. */
+  session: number;
   players: LobbyPlayer[];
   online: string[];
   state: Json | null;
   version: number;
-  roundMs: number;
+  /** Kills and deaths per seat since its current occupant arrived. */
+  scores: ScoreRow[];
 }
 
 type ServerMessage =
@@ -25,14 +29,17 @@ type ServerMessage =
   | { t: "state"; state: Json | null; version: number; by: string }
   | { t: "ack"; rid: number; version: number }
   | { t: "nack"; rid: number; code: string; message: string }
-  | { t: "round"; round: number; you: string | null; players: LobbyPlayer[]; online: string[] }
+  | { t: "scores"; scores: ScoreRow[] }
+  | { t: "reseat"; you: string }
   | { t: "pong"; at: number | null };
 
 export interface LobbyEvents {
   players: (players: LobbyPlayer[], online: string[]) => void;
   room: (from: string, type: string, payload: Json) => void;
   state: (state: Json | null, version: number, by: string) => void;
-  round: (round: number) => void;
+  scores: (scores: ScoreRow[]) => void;
+  /** A seat freed up for us (we were watching): the game reloads into it. */
+  reseat: () => void;
   closed: () => void;
 }
 
@@ -116,8 +123,11 @@ export class LobbyConnection {
         this.pending.get(msg.rid)?.reject({ code: msg.code, message: msg.message });
         this.pending.delete(msg.rid);
         break;
-      case "round":
-        this.handlers.round?.(msg.round);
+      case "scores":
+        this.handlers.scores?.(msg.scores);
+        break;
+      case "reseat":
+        this.handlers.reseat?.();
         break;
       default:
         break;

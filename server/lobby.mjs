@@ -1,20 +1,23 @@
 // One always-on Frontline lobby: the arcade's equivalent of a dedicated game
-// server. It owns who sits where (8 seats; a seat nobody holds is a bot), the
-// shared match document (compare-and-set, like the XApps SDK's state.set),
-// and the round rotation, and relays every player's packets to the others.
-// The simulation itself stays in the players' games, as in Frontline: each
-// player runs their own soldier, and one of them (the "driver") runs the bots.
+// server. An endless free for all: no clock, no kill limit. It owns who sits
+// where (8 seats; a seat nobody holds is a bot), the shared match document
+// (compare-and-set, like the XApps SDK's state.set) and the score, and relays
+// every player's packets to the others. The simulation itself stays in the
+// players' games, as in Frontline: each player runs their own soldier, and one
+// of them (the "driver") runs the bots.
+//
+// The score is the server's: it counts each new kill in the document's ledger
+// once, per seat, and a seat's count starts over when someone new takes it, so
+// you see your own kills, never the bot's before you.
 
 export const SEATS = 8;
 export const BOT_NAMES = ["Ghost", "Viper", "Havoc", "Rook", "Nomad", "Saber", "Jinx", "Atlas"];
-/** Frontline round length in the arcade (shorter than XApps matches: people come and go). */
-export const ROUND_MS = 5 * 60_000;
-/** How long the final scoreboard shows before the next round. */
-export const INTERMISSION_MS = 12_000;
-/** A round nobody is in for this long starts over, so the next person isn't dropped into a stale one. */
+/** A lobby nobody is in for this long starts over (a fresh ledger), so the next person isn't dropped into stale state. */
 export const EMPTY_RESET_MS = 30_000;
-/** Largest shared document accepted (Frontline's is a few KB). */
+/** Largest shared document accepted (Frontline's endless ledger keeps it to a few KB). */
 export const MAX_STATE_BYTES = 64 * 1024;
+/** Kill keys remembered to count each kill once (the ledger trims; this outlasts it). */
+const COUNTED_KEYS = 20_000;
 
 const seatId = (i) => `seat-${i}`;
 
@@ -26,11 +29,17 @@ export class Lobby {
     this.seats = Array.from({ length: SEATS }, () => null);
     /** Connections watching without a seat (the lobby is full). */
     this.spectators = new Set();
-    this.round = 1;
+    this.session = 1;
     this.state = null;
     this.version = 0;
-    this.roundEndsAt = null;
     this.emptySince = this.now();
+    this.resetScores();
+  }
+
+  resetScores() {
+    this.scores = Array.from({ length: SEATS }, () => ({ kills: 0, deaths: 0 }));
+    /** Kill keys ("victim:life") already counted, oldest first. */
+    this.counted = new Set();
   }
 
   /** The XApps-style player list every game is launched with. */
@@ -49,6 +58,10 @@ export class Lobby {
     return this.seats.flatMap((s, i) => (s ? [seatId(i)] : []));
   }
 
+  scoreRows() {
+    return this.scores.map((s, seat) => ({ seat, kills: s.kills, deaths: s.deaths }));
+  }
+
   connections() {
     return [...this.seats.filter(Boolean).map((s) => s.conn), ...this.spectators];
   }
@@ -60,8 +73,7 @@ export class Lobby {
     const free = this.seats.findIndex((s) => s === null);
     let you = null;
     if (free >= 0) {
-      this.seats[free] = { conn, name };
-      conn.seat = free;
+      this.seat(conn, free);
       you = seatId(free);
     } else {
       this.spectators.add(conn);
@@ -69,26 +81,44 @@ export class Lobby {
     }
     this.emptySince = null;
     this.broadcast({ t: "players", players: this.players(), online: this.online() }, conn);
+    this.broadcast({ t: "scores", scores: this.scoreRows() }, conn);
     return {
       t: "welcome",
       you,
-      round: this.round,
+      session: this.session,
       players: this.players(),
       online: this.online(),
       state: this.state,
       version: this.version,
-      roundMs: ROUND_MS,
+      scores: this.scoreRows(),
     };
   }
 
+  /** Puts `conn` in seat `i` with a fresh score (the bot's kills before them aren't theirs). */
+  seat(conn, i) {
+    this.seats[i] = { conn, name: conn.name ?? "Player" };
+    conn.seat = i;
+    this.scores[i] = { kills: 0, deaths: 0 };
+  }
+
   leave(conn) {
-    if (conn.seat !== null && conn.seat !== undefined && this.seats[conn.seat]?.conn === conn) {
-      this.seats[conn.seat] = null;
-      // A spectator takes the freed seat at the next round (their game was launched without one).
+    const seat = conn.seat;
+    if (seat !== null && seat !== undefined && this.seats[seat]?.conn === conn) {
+      this.seats[seat] = null;
+      // The bot taking the seat back starts from zero too.
+      this.scores[seat] = { kills: 0, deaths: 0 };
+      // Someone waiting gets the seat; their game was launched without one, so it reloads.
+      const next = this.spectators.values().next().value;
+      if (next) {
+        this.spectators.delete(next);
+        this.seat(next, seat);
+        next.send({ t: "reseat", you: seatId(seat) });
+      }
     }
     this.spectators.delete(conn);
     if (this.online().length === 0 && this.emptySince === null) this.emptySince = this.now();
     this.broadcast({ t: "players", players: this.players(), online: this.online() });
+    this.broadcast({ t: "scores", scores: this.scoreRows() });
   }
 
   /** One message from a client. Returns a reply for that client, or null. */
@@ -109,50 +139,44 @@ export class Lobby {
       if (text.length > MAX_STATE_BYTES) return { t: "nack", rid, code: "invalid_params", message: "Match state is too large" };
       this.state = msg.state ?? null;
       this.version += 1;
-      this.noteRoundEnd();
       this.broadcast({ t: "state", state: this.state, version: this.version, by: seatId(conn.seat) }, conn);
+      if (this.countKills(this.state)) this.broadcast({ t: "scores", scores: this.scoreRows() });
       return { t: "ack", rid, version: this.version };
     }
     if (msg.t === "ping") return { t: "pong", at: msg.at ?? null };
     return null;
   }
 
-  /** When the shared document says the round is over (kill limit or clock), schedule the next one. */
-  noteRoundEnd() {
-    const doc = this.state;
-    if (this.roundEndsAt !== null || !doc || typeof doc !== "object") return;
-    if (doc.end && typeof doc.end === "object") this.roundEndsAt = this.now() + INTERMISSION_MS;
+  /**
+   * Counts the ledger's kills not counted yet: `[victimSeat, victimLife, killerSeat, ...]`, keyed
+   * by victim and life like Frontline's own dedupe. Returns whether anything changed.
+   */
+  countKills(doc) {
+    const ledger = doc && typeof doc === "object" && Array.isArray(doc.k) ? doc.k : [];
+    let changed = false;
+    for (const rec of ledger) {
+      if (!Array.isArray(rec) || rec.length < 3) continue;
+      const [victim, life, killer] = rec;
+      if (!Number.isInteger(victim) || !Number.isInteger(life) || victim < 0 || victim >= SEATS) continue;
+      const key = `${victim}:${life}`;
+      if (this.counted.has(key)) continue;
+      this.counted.add(key);
+      if (this.counted.size > COUNTED_KEYS) this.counted.delete(this.counted.values().next().value);
+      this.scores[victim].deaths += 1;
+      if (Number.isInteger(killer) && killer >= 0 && killer < SEATS && killer !== victim) this.scores[killer].kills += 1;
+      changed = true;
+    }
+    return changed;
   }
 
-  /** Called every second: rotates rounds and resets an empty lobby. */
+  /** Called every second: an empty lobby starts over. */
   tick() {
-    const now = this.now();
-    const doc = this.state;
-    // Nobody wrote the end but the clock ran out (everyone left near the end, say).
-    if (this.roundEndsAt === null && doc && typeof doc.t0 === "number" && typeof doc.dur === "number" && now > doc.t0 + doc.dur + 5_000) {
-      this.roundEndsAt = now + INTERMISSION_MS;
-    }
     const empty = this.online().length === 0;
-    if ((this.roundEndsAt !== null && now >= this.roundEndsAt) || (empty && this.emptySince !== null && now - this.emptySince > EMPTY_RESET_MS && this.state !== null)) {
-      this.nextRound();
-    }
-  }
-
-  nextRound() {
-    this.round += 1;
-    this.state = null;
-    this.version = 0;
-    this.roundEndsAt = null;
-    // Spectators waiting for a seat get one now.
-    for (const conn of [...this.spectators]) {
-      const free = this.seats.findIndex((s) => s === null);
-      if (free < 0) break;
-      this.spectators.delete(conn);
-      this.seats[free] = { conn, name: conn.name ?? "Player" };
-      conn.seat = free;
-    }
-    for (const conn of this.connections()) {
-      conn.send({ t: "round", round: this.round, you: conn.seat === null || conn.seat === undefined ? null : seatId(conn.seat), players: this.players(), online: this.online() });
+    if (empty && this.emptySince !== null && this.now() - this.emptySince > EMPTY_RESET_MS && this.state !== null) {
+      this.session += 1;
+      this.state = null;
+      this.version = 0;
+      this.resetScores();
     }
   }
 

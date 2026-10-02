@@ -349,10 +349,32 @@ function Compass({ innerRef }: { innerRef: React.RefObject<HTMLDivElement | null
 }
 
 function ScoreBar({ hud, onTap, compact }: { hud: HudState; onTap: () => void; compact: boolean }) {
-  const low = hud.remainingMs < 30_000 && hud.phase === "live";
+  const low = !hud.endless && hud.remainingMs < 30_000 && hud.phase === "live";
   const me = hud.me;
   let middle: ReactNode;
-  if (hud.teams) {
+  if (hud.endless) {
+    // Claude Arcade: no clock in an endless match. Your kills (since you dropped in) take its place.
+    const mineRow = hud.scores.find((s) => s.isMe);
+    const rival = [...hud.scores].filter((s) => !s.isMe).sort((a, b) => b.kills - a.kills)[0];
+    middle = (
+      <span className="flex items-center gap-2 font-mono text-sm font-bold tabular">
+        <span className="flex items-baseline gap-1">
+          <span className="text-base text-[var(--accent-from)]">{mineRow?.kills ?? 0}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-300">kills</span>
+        </span>
+        <span className="flex items-baseline gap-1 text-ink-300">
+          <span>{mineRow?.deaths ?? 0}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider">deaths</span>
+        </span>
+        {rival && (
+          <span className="flex max-w-24 items-center gap-1 rounded-md bg-black/25 px-1.5 text-[11px] font-semibold sm:max-w-32" title="Best rival">
+            <span className="truncate">{rival.isBot ? rival.name : `@${rival.handle}`}</span>
+            <span className="font-mono">{rival.kills}</span>
+          </span>
+        )}
+      </span>
+    );
+  } else if (hud.teams) {
     const mine = me?.team ?? 0;
     const theirs = mine === 0 ? 1 : 0;
     middle = (
@@ -386,7 +408,11 @@ function ScoreBar({ hud, onTap, compact }: { hud: HudState; onTap: () => void; c
   return (
     <button type="button" onClick={onTap} className="glass-strong pointer-events-auto flex flex-col items-center rounded-2xl px-3 py-1 shadow-[0_10px_30px_-12px_rgb(0_0_0/0.8)]">
       {middle}
-      {!compact && <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-400">{hud.teams ? `first to ${hud.limit}` : `first to ${hud.limit} kills`}</span>}
+      {!compact && (
+        <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-ink-400">
+          {hud.endless ? "endless free for all" : hud.teams ? `first to ${hud.limit}` : `first to ${hud.limit} kills`}
+        </span>
+      )}
     </button>
   );
 }

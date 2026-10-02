@@ -34,7 +34,18 @@ export interface MatchDoc {
   teams: number;
   k: KillRec[];
   end: { r: EndReason; at: number } | null;
+  /**
+   * Claude Arcade's endless free for all: deaths so far per seat (the next life number), so the
+   * ledger can keep only recent kills without lives repeating. Present only in endless matches.
+   */
+  lives?: number[];
 }
+
+/** An endless match: no clock and no kill limit (a JSON-safe "never"). */
+export const ENDLESS = Number.MAX_SAFE_INTEGER;
+/** Endless matches keep at most this many kills in the ledger, trimming back to KEEP_KILLS. */
+export const MAX_KILLS = 240;
+export const KEEP_KILLS = 160;
 
 export const MATCH_MS = 7 * 60_000;
 export const FFA_LIMIT = 20;
@@ -46,8 +57,11 @@ export function teamLimit(teamSize: number): number {
   return teamSize <= 1 ? FFA_LIMIT : teamSize === 2 ? 30 : 40;
 }
 
-export function newDoc(now: number, teams: number, seats: number, overrides: { dur?: number; lim?: number } = {}): MatchDoc {
+export function newDoc(now: number, teams: number, seats: number, overrides: { dur?: number; lim?: number; endless?: boolean } = {}): MatchDoc {
   const teamSize = teams >= 2 ? Math.ceil(seats / teams) : 1;
+  if (overrides.endless) {
+    return { v: 1, t0: now, dur: ENDLESS, lim: ENDLESS, teams: teams >= 2 ? teams : 0, k: [], end: null, lives: new Array<number>(seats).fill(0) };
+  }
   return {
     v: 1,
     t0: now,
@@ -65,7 +79,8 @@ export function parseDoc(raw: unknown): MatchDoc | null {
   if (d.v !== 1 || typeof d.t0 !== "number" || typeof d.dur !== "number" || typeof d.lim !== "number" || !Array.isArray(d.k)) return null;
   const k = d.k.filter((r): r is KillRec => Array.isArray(r) && r.length === 6 && r.every((v) => typeof v === "number" && Number.isFinite(v)));
   const end = d.end && typeof d.end === "object" && (d.end.r === "limit" || d.end.r === "time") && typeof d.end.at === "number" ? d.end : null;
-  return { v: 1, t0: d.t0, dur: d.dur, lim: d.lim, teams: typeof d.teams === "number" ? d.teams : 0, k, end };
+  const lives = Array.isArray(d.lives) && d.lives.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0) ? d.lives : undefined;
+  return { v: 1, t0: d.t0, dur: d.dur, lim: d.lim, teams: typeof d.teams === "number" ? d.teams : 0, k, end, ...(lives ? { lives } : {}) };
 }
 
 export const killKey = (victimSeat: number, life: number): string => `${victimSeat}:${life}`;
@@ -114,6 +129,16 @@ export function applyKill(doc: MatchDoc, rec: KillRec, now: number): MatchDoc | 
   if (victim < 0 || life < 0 || killer === victim) return undefined;
   if (doc.teams >= 2 && killer >= 0 && teamOf(killer, doc.teams) === teamOf(victim, doc.teams)) return undefined;
   if (doc.k.some((r) => r[0] === victim && r[1] === life)) return undefined;
+  if (doc.lives) {
+    // Endless: a life below the victim's count is already recorded (maybe trimmed away since).
+    if (life < (doc.lives[victim] ?? 0)) return undefined;
+    const lives = [...doc.lives];
+    while (lives.length <= victim) lives.push(0);
+    lives[victim] = life + 1;
+    let k = [...doc.k, rec];
+    if (k.length > MAX_KILLS) k = k.slice(k.length - KEEP_KILLS);
+    return { ...doc, k, lives };
+  }
   const next: MatchDoc = { ...doc, k: [...doc.k, rec] };
   if (limitReached(next)) next.end = { r: "limit", at: now };
   return next;
@@ -121,7 +146,7 @@ export function applyKill(doc: MatchDoc, rec: KillRec, now: number): MatchDoc | 
 
 /** Ends the match on the clock (a copy), or undefined when it isn't time or it already ended. */
 export function applyClock(doc: MatchDoc, now: number): MatchDoc | undefined {
-  if (doc.end || now < doc.t0 + doc.dur) return undefined;
+  if (doc.end || doc.lives || now < doc.t0 + doc.dur) return undefined;
   return { ...doc, end: { r: "time", at: now } };
 }
 

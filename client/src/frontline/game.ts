@@ -292,8 +292,8 @@ export interface GameOptions {
   seedRandom: (label: string) => () => number;
   transport: GameTransport;
   initialState: unknown;
-  /** Test overrides for the doc (dev only). */
-  docOverrides?: { dur?: number; lim?: number };
+  /** Test overrides for the doc (dev only); `endless` for Claude Arcade's endless free for all. */
+  docOverrides?: { dur?: number; lim?: number; endless?: boolean };
 }
 
 export type Phase = "live" | "over";
@@ -348,6 +348,7 @@ export class Game {
   private pendingDoc: KillRec[] = [];
   private wantClockEnd = false;
   private writing = false;
+  private arcadeScores: Map<number, { kills: number; deaths: number }> | null = null;
   /** Failed shared-state writes in a row (backs off) and whether writing stopped for good. */
   private writeFailures = 0;
   private docClosed = false;
@@ -587,14 +588,26 @@ export class Game {
   private deathsOf(seat: number): number {
     let n = 0;
     for (const r of this.kills.values()) if (r[0] === seat) n++;
-    return n;
+    // Endless matches trim the ledger: its per-seat life count covers what was trimmed.
+    return Math.max(n, this.doc.lives?.[seat] ?? 0);
+  }
+
+  /** Claude Arcade: kills and deaths per seat since its current occupant arrived (the server counts them). */
+  setArcadeScores(rows: readonly { seat: number; kills: number; deaths: number }[]): void {
+    this.arcadeScores = new Map(rows.map((r) => [r.seat, { kills: r.kills, deaths: r.deaths }]));
+    this.bump();
+  }
+
+  /** An endless match (Claude Arcade): no clock, no kill limit. */
+  get endless(): boolean {
+    return !!this.doc.lives;
   }
 
   /* ---------------------------------------------------------------------- */
   /* Shared doc                                                             */
   /* ---------------------------------------------------------------------- */
 
-  private initDoc(overrides?: { dur?: number; lim?: number }): void {
+  private initDoc(overrides?: { dur?: number; lim?: number; endless?: boolean }): void {
     const seats = this.soldiers.length;
     this.transport
       .update((raw) => (parseDoc(raw) ? undefined : newDoc(Date.now(), this.teams, seats, overrides)))
@@ -1706,7 +1719,8 @@ export class Game {
       remainingMs: this.remainingMs(),
       limit: this.doc.lim,
       teams: this.teams,
-      scores: this.soldiers.map((s) => ({ seat: s.seat, id: s.id, name: s.name, avatarUrl: s.avatarUrl, handle: s.handle, isBot: s.isBot, isMe: s.isMe, team: s.team, kills: t.kills.get(s.seat) ?? 0, deaths: t.deaths.get(s.seat) ?? 0, alive: s.alive, online: s.isBot || s.isMe || !this.online || this.online.has(s.id), link: s.isBot || s.isMe ? null : (this.transport.link?.(s.id) ?? null) })),
+      endless: this.endless,
+      scores: this.soldiers.map((s) => ({ seat: s.seat, id: s.id, name: s.name, avatarUrl: s.avatarUrl, handle: s.handle, isBot: s.isBot, isMe: s.isMe, team: s.team, kills: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.kills ?? 0) : (t.kills.get(s.seat) ?? 0), deaths: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.deaths ?? 0) : (t.deaths.get(s.seat) ?? 0), alive: s.alive, online: s.isBot || s.isMe || !this.online || this.online.has(s.id), link: s.isBot || s.isMe ? null : (this.transport.link?.(s.id) ?? null) })),
       teamScores: t.team,
       me: me
         ? {
@@ -1781,6 +1795,8 @@ export interface HudState {
   phase: Phase;
   remainingMs: number;
   limit: number;
+  /** Claude Arcade's endless free for all: no clock or limit to show. */
+  endless: boolean;
   teams: number;
   scores: { seat: number; id: string; name: string; handle: string; avatarUrl: string | null; isBot: boolean; isMe: boolean; team: number | null; kills: number; deaths: number; alive: boolean; online: boolean; link: PeerLink | null }[];
   teamScores: number[];

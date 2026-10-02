@@ -1,7 +1,7 @@
 /**
  * Claude Arcade's Frontline: joins the arcade lobby on this server, then runs
  * the game against the in-page arcade host. `?name=` is the player's name in
- * the lobby. A new round reloads the page into a fresh match.
+ * the lobby. A seat freeing up for a spectator reloads the page into it.
  */
 
 import { XAppsProvider } from "@xapps/sdk/react";
@@ -30,7 +30,7 @@ function Arcade() {
     LobbyConnection.open(url).then(
       ({ lobby, welcome }) => {
         if (!live) return lobby.close();
-        lobby.on("round", () => window.location.reload());
+        lobby.on("reseat", () => window.location.reload());
         lobby.on("closed", () => {
           setError("Lost the arcade server. Reconnecting…");
           setTimeout(() => window.location.reload(), 3000);

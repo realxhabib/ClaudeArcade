@@ -2,7 +2,7 @@
 
 A Claude Code plugin that drops you into a **Frontline** deathmatch while Claude works, on a shared server with everyone else waiting on Claude, and hands you back when it's done.
 
-When Claude has been working for two seconds, a pane opens beside the transcript and you drop into an eight-player free-for-all. Bots hold the seats nobody is in, and you take one over when you arrive. When Claude finishes, there's a three-second countdown and you're handed back, and a bot takes your soldier. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer.
+When Claude has been working for two seconds, a pane opens beside the transcript and you drop into an endless eight-player free-for-all: no clock and no kill limit, just your kills and deaths where the timer would be. Bots hold the seats nobody is in, and you take one over when you arrive. When Claude finishes, there's a three-second countdown and you're handed back, and a bot takes your soldier. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer.
 
 Frontline is the first-person shooter from [XApps](https://github.com/realxhabib/XApps), running as its real three.js game.
 
@@ -90,8 +90,8 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 
 | Path | What it is |
 | --- | --- |
-| `server/` | The always-on lobby: 8 seats (bots fill empty ones), compare-and-set match state, packet relay, 5-minute rounds with a scoreboard break. Node + `ws`, and it serves the client too. |
-| `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`). |
+| `server/` | The always-on lobby: 8 seats (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). The match is endless; an empty lobby starts over after 30 s. Node + `ws`, and it serves the client too. |
+| `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`) and the endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up). |
 | `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, `hooks/input.tsx` catches keys and the mouse over the picture, and `player/player.mjs` runs the game in headless Chrome, writes each frame as a PNG the terminal paints, and turns the pane's input into the game's. |
 
 ## Development

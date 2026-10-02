@@ -4,13 +4,13 @@
  * and answers from the arcade lobby instead of XApps: the seats are the
  * lobby's (a free seat is a bot), room messages and the shared match document
  * go through the arcade server, and progress (stats, achievements, results)
- * isn't kept. Seats changing mid-round arrive as `match.update`.
+ * isn't kept. Seats changing hands mid-match arrive as `match.update`.
  */
 
 import { SDK_VERSION, XAppsError, type Json, type LaunchContext, type PlayerInfo } from "@xapps/sdk";
 import { createHostCore, type HostHandlers } from "@xapps/sdk/host";
 import { createMemoryTransportPair } from "../sdk/transport";
-import type { LobbyConnection, LobbyPlayer, Welcome } from "./lobby";
+import type { LobbyConnection, LobbyPlayer, ScoreRow, Welcome } from "./lobby";
 
 const STORAGE_PREFIX = "claudearcade:storage:";
 
@@ -38,15 +38,15 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
   const startedAt = Date.now();
 
   const match = (): LaunchContext["match"] => ({
-    id: `arcade-frontline-${welcome.round}`,
+    id: `arcade-frontline-${welcome.session}`,
     mode: "live",
     status: "active",
     scoring: "high",
-    seed: `arcade-frontline-${welcome.round}`,
+    seed: `arcade-frontline-${welcome.session}`,
     players,
     seat: me ? me.seat : -1,
-    // Frontline reads `arcade` to run drop-in seats and arcade rounds.
-    settings: { arcade: true, roundMs: welcome.roundMs },
+    // Frontline reads `arcade` to run drop-in seats and the endless free for all.
+    settings: { arcade: true },
     minPlayers: 1,
     maxPlayers: players.length,
     teams: 0,
@@ -55,7 +55,7 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
     stateVersion: version,
     turn: null,
     turnDeadline: null,
-    round: welcome.round,
+    round: 0,
   });
 
   const context = (): LaunchContext => ({
@@ -71,7 +71,7 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
 
   const storageKey = (key: string) => `${STORAGE_PREFIX}${key}`;
   const handlers: HostHandlers = {
-    // Arcade rounds are already running: start at once.
+    // The endless match is already running: start at once.
     ready: () => ({ startedAt }),
     "room.send": ({ type, payload }) => {
       lobby.sendRoom(type, payload);
@@ -145,7 +145,12 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
     bridge.emit("match.update", { match: match() });
     bridge.emit("room.presence", { online });
   });
+  // The server keeps the score: Frontline hears it as a room message from the host.
+  const sendScores = (scores: ScoreRow[]) =>
+    bridge.emit("room.message", { type: "arcade.scores", payload: scores as unknown as Json, from: "arcade", at: Date.now() });
+  lobby.on("scores", sendScores);
   bridge.emit("room.presence", { online: welcome.online });
+  sendScores(welcome.scores);
 
   return { transport: pair.app, bridge };
 }
