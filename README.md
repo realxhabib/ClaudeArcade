@@ -31,23 +31,22 @@ To turn it off again, run `/arcade off`.
 - [Node.js](https://nodejs.org) 18 or later on your `PATH`
 - Claude Code 2.1.287 or later, in a terminal with true colour
 
-## Pixels or blocks
+## Where the game shows
 
-The game shows in one of two ways:
+- **A game window** (Windows, and the Claude desktop app): the game pops up in its own Chrome or Edge window when you drop in, at full quality with real mouse aim. It minimizes when Claude is done (a banner counts you down first) and comes back on the next turn. The pane beside the transcript keeps your health, ammo and score.
+- **Pixels**, in the pane itself, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code (macOS and Linux).
+- **Blocks**, in the pane, the picture drawn with `▀` characters, each one two coloured pixels, in any terminal with true colour. Coarse: shrink the terminal's font (Ctrl or Cmd and minus) for a sharper picture. Health, ammo and the score are written under it.
 
-- **Pixels**, the real picture, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code.
-- **Blocks**, the picture drawn with `▀` characters, each one two coloured pixels, in any terminal with true colour: Windows Terminal, iTerm2, Terminal.app, VS Code's. Blocks are coarse, so your health, ammo, kills and the leading rival are written in a line under the picture.
-
-On Windows it starts in blocks. Elsewhere it starts in pixels and switches to blocks by itself if your terminal turns out not to draw images. To choose yourself, run `/arcade view blocks`, `/arcade view pixels`, or `/arcade view auto` to go back to choosing automatically. Make the pane wider for a sharper block picture.
+It picks for you: a window on Windows or without a terminal, pixels elsewhere, switching to blocks by itself if your terminal turns out not to draw images. To choose, run `/arcade view window`, `/arcade view pixels` or `/arcade view blocks`, and `/arcade view auto` to go back to choosing automatically.
 
 ## Controls
 
-Click the game first so it gets your keys.
+Click the game first so it gets your keys (in the game window, clicking also captures the mouse for aiming; Esc frees it).
 
 | | |
 | :- | :- |
 | Move | WASD |
-| Aim | move the mouse over the game, or the arrow keys |
+| Aim | the mouse (in the pane, move it over the picture), or the arrow keys in the pane |
 | Fire | left click (hold) |
 | Aim down sights | right click (hold) |
 | Sprint | Shift with W (capital W) |
@@ -57,7 +56,7 @@ Click the game first so it gets your keys.
 | Crouch | C |
 | Swap weapon | Q, or 1 and 2 |
 
-Terminals report key presses but not releases, so a key counts as held until its auto-repeat stops.
+In the pane, terminals report key presses but not releases, so a key counts as held until its auto-repeat stops.
 
 ## What it connects to
 
@@ -101,7 +100,7 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 | --- | --- |
 | `server/` | The always-on lobby: 8 seats (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). The match is endless; an empty lobby starts over after 30 s. Node + `ws`, and it serves the client too. |
 | `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`) and the endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up). |
-| `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in headless Chrome or Edge, hands each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`), and turns the pane's input, posted to it on localhost behind a random token, into the game's. `player/setup.mjs` finds or downloads the browser. |
+| `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in Chrome or Edge: in its own window, or headless, handing each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`) and turning the pane's input into the game's. The mod controls it over localhost behind a random token. `player/setup.mjs` finds or downloads the browser. |
 
 ## Development
 

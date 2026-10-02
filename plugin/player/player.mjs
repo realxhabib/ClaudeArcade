@@ -2,13 +2,15 @@
 // Claude Arcade player: the arcade's equivalent of intermission's patched Doom
 // engine. Runs the real game in headless Chrome or Edge (driven over a pipe, no
 // npm dependencies), hands each frame to the pane, and turns the pane's keys
-// and mouse into the game's input. Two ways to show a frame:
+// and mouse into the game's input. Three ways to show the game:
 //   pixels  a PNG file the terminal paints itself (Ghostty, kitty)
 //   cells   "▀" block characters, two pixels per cell, for any terminal with
 //           true colour (Windows Terminal, iTerm2, VS Code's)
+//   window  not headless: the game in its own browser window, played there
+//           with the real keyboard and mouse; the pane only shows the score
 //
 //   node player.mjs --chrome <path> --url <game url>
-//                   [--view pixels|cells] [--columns 160] [--frames <dir>]
+//                   [--view pixels|cells|window] [--columns 160] [--frames <dir>]
 //                   [--width 640] [--height 360] [--fps 30] [--sound]
 //
 // stdout, one JSON line each: {"input":"http://127.0.0.1:<port>/<token>"}
@@ -19,7 +21,10 @@
 // Input: HTTP on localhost, behind the printed URL's random token:
 //   POST <url>/input { keys: string[] (KeyboardEvent.code held), fire, aim:
 //     boolean, look: { dx, dy } (pixels of mouse movement since the last post) }
-//   POST <url>/view { view: "pixels" | "cells", columns } switches on the fly.
+//   POST <url>/view { view: "pixels" | "cells", columns } switches on the fly
+//     (headless only; a window stays a window).
+//   POST <url>/window { state: "normal" | "minimized" } shows or hides the window.
+//   POST <url>/notice { text } shows a line over the game ("" clears it).
 // Killing this process (or its parent going away) ends Chrome too (its pipe closes).
 
 import { spawn } from "node:child_process";
@@ -40,14 +45,15 @@ if (!args.chrome || !args.url) {
 }
 const frames = args.frames ? String(args.frames) : join(tmpdir(), `claudearcade-${process.pid}`);
 mkdirSync(frames, { recursive: true });
+const WINDOWED = args.view === "window";
 let view = args.view === "cells" ? "cells" : "pixels";
 let columns = clampColumns(args.columns ?? 160);
 const profile = join(tmpdir(), `claudearcade-profile-${process.pid}`);
 
 const chromeArgs = [
-  "--headless",
+  ...(WINDOWED ? [] : ["--headless"]),
   "--remote-debugging-pipe",
-  `--window-size=${WIDTH},${HEIGHT}`,
+  WINDOWED ? "--window-size=1280,760" : `--window-size=${WIDTH},${HEIGHT}`,
   `--user-data-dir=${profile}`,
   "--no-first-run",
   "--no-default-browser-check",
@@ -62,7 +68,8 @@ const chromeArgs = [
   // Chrome refuses to run as root without it (containers, CI); a person's own session never is root.
   ...(process.getuid?.() === 0 ? ["--no-sandbox"] : []),
   ...(args["extra-chrome-args"] ? String(args["extra-chrome-args"]).split(" ").filter(Boolean) : []),
-  "about:blank",
+  // A window with no tabs or address bar, just the game.
+  WINDOWED ? `--app=${args.url}` : "about:blank",
 ];
 const chrome = spawn(args.chrome, chromeArgs, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
 let chromeLog = "";
@@ -122,21 +129,43 @@ function cdp(method, params = {}, sessionId) {
 /* ---------------------------------------------------------------- the page */
 
 let session = null;
+let target = null;
 let gen = 0;
 
 async function start() {
   const { targetInfos } = await cdp("Target.getTargets");
   const page = targetInfos.find((t) => t.type === "page");
   const targetId = page ? page.targetId : (await cdp("Target.createTarget", { url: "about:blank" })).targetId;
+  target = targetId;
   ({ sessionId: session } = await cdp("Target.attachToTarget", { targetId, flatten: true }));
   await cdp("Page.enable", {}, session);
-  await cdp("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false }, session);
-  listeners.set("Page.loadEventFired", () => out({ ready: true }));
+  if (!WINDOWED) await cdp("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false }, session);
+  if (!WINDOWED) listeners.set("Page.loadEventFired", () => out({ ready: true }));
+  // The person closing the game window ends the game.
+  listeners.set("Target.detachedFromTarget", () => shutdown());
+  void hudLoop();
+  // The app window opened on the game already.
+  if (WINDOWED) {
+    out({ ready: true });
+    return;
+  }
   await cdp("Page.navigate", { url: args.url }, session);
   void captureLoop();
-  void hudLoop();
   // Keep the page "focused" so it gets keys and keeps rendering.
   await cdp("Emulation.setFocusEmulationEnabled", { enabled: true }, session).catch(() => {});
+}
+
+/** Shows (and brings to the front) or minimizes the game window. */
+async function setWindow(state) {
+  if (!WINDOWED || !target) return;
+  const { windowId } = await cdp("Browser.getWindowForTarget", { targetId: target });
+  await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: state === "minimized" ? "minimized" : "normal" } });
+  if (state !== "minimized") await cdp("Page.bringToFront", {}, session);
+}
+
+async function notice(text) {
+  if (!session) return;
+  await cdp("Runtime.evaluate", { expression: `window.__arcadeNotice && window.__arcadeNotice(${JSON.stringify(String(text ?? "").slice(0, 120))})` }, session);
 }
 
 /**
@@ -250,7 +279,7 @@ async function button(which, down) {
 const token = randomBytes(16).toString("hex");
 const server = createServer((req, res) => {
   const route = req.method === "POST" && req.url?.startsWith(`/${token}/`) ? req.url.slice(token.length + 2) : null;
-  if (route !== "input" && route !== "view") {
+  if (route !== "input" && route !== "view" && route !== "window" && route !== "notice") {
     res.statusCode = 404;
     res.end();
     return;
@@ -264,8 +293,15 @@ const server = createServer((req, res) => {
     } catch {
       // ignore a bad post
     }
+    if (route === "window" || route === "notice") {
+      (route === "window" ? setWindow(msg?.state) : notice(msg?.text)).then(
+        () => res.end("{}"),
+        (error) => res.end(JSON.stringify({ error: error.message })),
+      );
+      return;
+    }
     if (route === "view") {
-      if (msg?.view === "cells" || msg?.view === "pixels") view = msg.view;
+      if (!WINDOWED && (msg?.view === "cells" || msg?.view === "pixels")) view = msg.view;
       if (msg?.columns !== undefined) columns = clampColumns(msg.columns);
       res.end("{}");
       return;

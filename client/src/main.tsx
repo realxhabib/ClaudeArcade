@@ -1,7 +1,9 @@
 /**
  * Claude Arcade's Frontline: joins the arcade lobby on this server, then runs
  * the game against the in-page arcade host. `?name=` is the player's name in
- * the lobby. A seat freeing up for a spectator reloads the page into it.
+ * the lobby; `?pane` marks the hidden browser that paints a terminal pane
+ * (mouse look from cursor movement, no pointer lock). A seat freeing up for a
+ * spectator reloads the page into it.
  */
 
 import { XAppsProvider } from "@xapps/sdk/react";
@@ -14,7 +16,25 @@ import { FrontlineLoading } from "./frontline/loading";
 import { setArcadeMode } from "./frontline/input";
 import "./globals.css";
 
-setArcadeMode(true);
+setArcadeMode(new URLSearchParams(window.location.search).has("pane"));
+
+/** A line over the game the Claude Arcade mod sets ("Claude's done · back in 3"), via `window.__arcadeNotice`. */
+function ArcadeNotice() {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    const w = window as unknown as { __arcadeNotice?: (text: string) => void };
+    w.__arcadeNotice = (next) => setText(String(next));
+    return () => {
+      delete w.__arcadeNotice;
+    };
+  }, []);
+  if (!text) return null;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-16 z-50 flex justify-center">
+      <div className="rounded-full bg-black/70 px-5 py-2 text-lg font-semibold text-white shadow-lg">{text}</div>
+    </div>
+  );
+}
 
 type Joined = { transport: ReturnType<typeof startArcadeHost>["transport"] };
 
@@ -66,6 +86,7 @@ createRoot(document.getElementById("root")!).render(
       style={{ "--accent-from": "#f2b544", "--accent-to": "#e2553a" } as React.CSSProperties}
     >
       <Arcade />
+      <ArcadeNotice />
     </div>
   </StrictMode>,
 );

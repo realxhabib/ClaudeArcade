@@ -295,7 +295,7 @@ export function Hud({
                 )}
               </button>
               {!touch && <p className="mt-2 text-center text-[11px] text-ink-400">WASD move · Shift sprint · C crouch · Space jump · Right mouse aim · R reload · 1/2 swap · G grenade (hold, release to throw) · Tab scores · Esc menu</p>}
-              {game.solo && <p className="mt-1 text-center text-[11px] font-semibold text-ink-300">Practice is paused</p>}
+              {game.solo && <p className="mt-1 text-center text-[11px] font-semibold text-ink-300">{game.endless ? "Paused while you're the only player here" : "Practice is paused"}</p>}
               <Connections hud={hud} />
               <SettingsPanel settings={settings} onSettings={onSettings} touch={touch} tier={tier} />
             </div>

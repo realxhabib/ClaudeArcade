@@ -4,11 +4,13 @@
 // always-on game server (../../server), and here the real game running
 // headless (../player/player.mjs, Chrome or Edge) painting its frames into a pane.
 //
-// Two views: "pixels", real images, where the terminal draws them (Ghostty,
-// kitty), and "blocks", the picture in "▀" characters, two pixels per cell, in
-// any true-colour terminal (Windows Terminal among them). Windows starts on
-// blocks; elsewhere a terminal that turns out not to draw images switches to
-// blocks by itself. `/arcade view` picks one.
+// Three views: "pixels", real images in the pane, where the terminal draws them
+// (Ghostty, kitty); "blocks", the picture in "▀" characters, two pixels per
+// cell, in any true-colour terminal; and "window", the game in its own browser
+// window that pops up while Claude works and minimizes when it's done, the pane
+// keeping the score. Windows, and the Claude desktop app (no terminal), start
+// in a window; elsewhere a terminal that turns out not to draw images switches
+// to blocks by itself. `/arcade view` picks one.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -38,7 +40,7 @@ const NAME_ENDS = ['Soldier', 'Sniper', 'Grunt', 'Medic', 'Recruit', 'Dev']
 
 type Timer = { cancel: () => void }
 type Stream = AsyncIterable<{ stream: 'stdout' | 'stderr'; text: string }> & { return?: () => unknown }
-type View = 'pixels' | 'blocks'
+type View = 'pixels' | 'blocks' | 'window'
 type Grid = { cells: string; columns: number; rows: number; gen: number }
 
 /** The game's numbers (client/src/frontline/status.ts), for the status line under a block picture. */
@@ -60,10 +62,13 @@ export type Hud = {
 let isOn = false
 let name = 'QueuedSoldier'
 let server = DEFAULT_SERVER
-/** What the person picked with `/arcade view`; `auto` is blocks on Windows, pixels until refused elsewhere. */
+/** What the person picked with `/arcade view`; `auto` is a window on Windows or without a terminal, else pixels until refused. */
 let viewChoice: 'auto' | View = 'auto'
 let view: View = 'pixels'
-let isWindows = false
+/** Node's `process.platform` where the game runs, once asked. */
+let platform: string | null = null
+/** Whether the running player is a game window (switching to or from one restarts it). */
+let playerWindowed = false
 
 //   idle      not playing
 //   waiting   Claude is working; dropping in once the delay passes
@@ -106,14 +111,29 @@ function armDropIn($: Engine) {
   timer = $.clock.after(DROP_IN_DELAY_MS, () => void dropIn($))
 }
 
+/** Settles `view` for this drop-in: the person's pick, or what suits this machine and app. */
+async function resolveView($: Engine): Promise<View | null> {
+  const hasTerminal = (await $.session.surfaces()).includes('terminal')
+  if (viewChoice !== 'auto') return viewChoice === 'window' || hasTerminal ? viewChoice : null
+  if (platform === null) {
+    const run = await $.process.run(['node', '-p', 'process.platform']).catch(() => null)
+    platform = run?.exitCode === 0 ? run.stdout.trim() : ''
+  }
+  // Windows terminals can't draw images in Claude Code (blocks are too coarse to play well), and
+  // the desktop app has no terminal at all: a real game window plays best.
+  if (platform === 'win32' || !hasTerminal) return 'window'
+  return view === 'blocks' ? 'blocks' : 'pixels'
+}
+
 async function dropIn($: Engine) {
   if (phase !== 'waiting') return
   timer = null
-  const surfaces = await $.session.surfaces()
-  if (!surfaces.includes('terminal')) {
-    phase = 'idle'
+  const next = await resolveView($)
+  if (!next || phase !== 'waiting') {
+    if (phase === 'waiting') phase = 'idle'
     return
   }
+  adoptView(next)
   const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
   if (!opened.isPlaced) {
     await $.ui.close({ id: PANE })
@@ -123,12 +143,24 @@ async function dropIn($: Engine) {
   await startPlaying($)
 }
 
+/** Takes `next` as the view; a running player of the other kind (window or headless) goes. */
+function adoptView(next: View) {
+  if (next === view) return
+  view = next
+  if (player && playerWindowed !== (next === 'window')) stopPlayer()
+  clearFrames()
+}
+
 async function startPlaying($: Engine) {
   phase = 'playing'
   warmTimer?.cancel()
   warmTimer = null
   $.ui.invalidate('ui.render')
   if (!player) void runPlayer($)
+  else if (playerWindowed) {
+    await postToPlayer($, 'notice', { text: '' })
+    await postToPlayer($, 'window', { state: 'normal' })
+  }
 }
 
 function startCountdown($: Engine) {
@@ -136,10 +168,14 @@ function startCountdown($: Engine) {
   phase = 'countdown'
   countdown = COUNTDOWN_SECONDS
   $.ui.invalidate('ui.render')
+  const say = () => playerWindowed && void postToPlayer($, 'notice', { text: `Claude's done · back to Claude in ${countdown}` })
+  say()
   timer = $.clock.every(1000, () => {
     countdown--
-    if (countdown > 0) $.ui.invalidate('ui.render')
-    else void handBack($)
+    if (countdown > 0) {
+      say()
+      $.ui.invalidate('ui.render')
+    } else void handBack($)
   })
 }
 
@@ -148,7 +184,16 @@ async function handBack($: Engine) {
   if (phase === 'idle') return
   phase = 'idle'
   await $.ui.close({ id: PANE })
+  await putAway($)
+}
+
+/** Out of the way between turns, seat kept warm: keys let go, the window minimized. */
+async function putAway($: Engine) {
   await sendInput($, { keys: [], fire: false, aim: false })
+  if (playerWindowed) {
+    await postToPlayer($, 'notice', { text: '' })
+    await postToPlayer($, 'window', { state: 'minimized' })
+  }
   warmTimer?.cancel()
   warmTimer = $.clock.after(KEEP_WARM_MS, () => stopPlayer())
 }
@@ -188,8 +233,6 @@ async function setup($: Engine): Promise<string | null> {
     const dist = `${$.plugin.root}/dist`
     const found = await runSetup($, ['find', dist])
     if (!found) return null
-    isWindows = found.platform === 'win64'
-    if (viewChoice === 'auto' && isWindows) view = 'blocks'
     if (found.browser) return found.browser
     if (!found.platform) {
       status = 'Claude Arcade needs Chrome or Edge installed here (no headless Chrome download for this system).'
@@ -235,13 +278,21 @@ async function runPlayer($: Engine) {
     $.ui.invalidate('ui.render')
     return
   }
-  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}`
-  status = `Joining the Frontline server as ${name}…`
+  const windowed = view === 'window'
+  if (windowed && /chrome-headless-shell/.test(chrome)) {
+    status = 'The game window needs Google Chrome or Microsoft Edge installed. /arcade view blocks plays in the terminal instead.'
+    $.ui.invalidate('ui.render')
+    return
+  }
+  // `pane`: the hidden browser painting the pane takes mouse look from the pane, not pointer lock.
+  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${windowed ? '' : '&pane=1'}`
+  status = windowed ? `Opening the game window as ${name}…` : `Joining the Frontline server as ${name}…`
   $.ui.invalidate('ui.render')
+  playerWindowed = windowed
   const stream = $.process.spawn({
     argv: [
       'node', `${$.plugin.root}/player/player.mjs`, '--chrome', chrome, '--url', url,
-      '--view', view === 'blocks' ? 'cells' : 'pixels', '--columns', String(blockColumns),
+      '--view', windowed ? 'window' : view === 'blocks' ? 'cells' : 'pixels', '--columns', String(blockColumns),
       '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', view === 'blocks' ? '20' : '30',
     ],
   }) as unknown as Stream
@@ -269,8 +320,8 @@ async function runPlayer($: Engine) {
     player = null
     clearFrames()
     inputUrl = null
-    if (phase === 'playing') {
-      status = 'The game stopped. /arcade restarts it.'
+    if (phase === 'playing' || phase === 'countdown') {
+      status = windowed ? 'The game window closed. /arcade opens it again.' : 'The game stopped. /arcade restarts it.'
       $.ui.invalidate('ui.render')
     }
   }
@@ -292,6 +343,9 @@ const isShowing = () => phase === 'playing' || phase === 'countdown'
 function onPlayerMessage($: Engine, msg: PlayerMessage) {
   if (typeof msg.input === 'string') {
     inputUrl = msg.input
+  } else if ((msg as { ready?: boolean }).ready && playerWindowed) {
+    status = null
+    $.ui.invalidate('ui.render')
   } else if (msg.frame && typeof msg.gen === 'number') {
     if (view !== 'pixels') return
     const first = !frame
@@ -317,7 +371,7 @@ function onPlayerMessage($: Engine, msg: PlayerMessage) {
     }
   } else if (msg.hud !== undefined) {
     hud = msg.hud
-    if (view === 'blocks' && isShowing()) $.ui.invalidate('ui.render')
+    if (view !== 'pixels' && isShowing()) $.ui.invalidate('ui.render')
   } else if (msg.error) {
     $.ui.log(`claudearcade player: ${msg.error}`, { to: 'debug' })
   }
@@ -338,10 +392,13 @@ function onImageBlit($: Engine, result: { deny?: string }) {
 }
 
 async function setView($: Engine, next: View) {
+  const restart = !!player && playerWindowed !== (next === 'window')
+  adoptView(next)
   view = next
   clearFrames()
   $.ui.invalidate('ui.render')
-  await postToPlayer($, 'view', { view: next === 'blocks' ? 'cells' : 'pixels', columns: blockColumns })
+  if (restart && isShowing()) void runPlayer($)
+  else if (!playerWindowed) await postToPlayer($, 'view', { view: next === 'blocks' ? 'cells' : 'pixels', columns: blockColumns })
 }
 
 type Input = { keys: string[]; fire: boolean; aim: boolean; look?: { dx: number; dy: number } }
@@ -350,7 +407,7 @@ async function sendInput($: Engine, input: Input) {
   await postToPlayer($, 'input', input)
 }
 
-async function postToPlayer($: Engine, route: 'input' | 'view', body: unknown) {
+async function postToPlayer($: Engine, route: 'input' | 'view' | 'window' | 'notice', body: unknown) {
   if (!inputUrl || !player) return
   await $.http.fetch(`${inputUrl}/${route}`, { method: 'POST', body: JSON.stringify(body) }).catch(() => {})
 }
@@ -383,7 +440,7 @@ export const register: Register = on => {
     const savedServer = await $.store.get('server')
     if (typeof savedServer === 'string' && savedServer) server = savedServer
     const savedView = await $.store.get('view')
-    if (savedView === 'blocks' || savedView === 'pixels') view = viewChoice = savedView
+    if (savedView === 'blocks' || savedView === 'pixels' || savedView === 'window') view = viewChoice = savedView
     await $.command.register({
       name: 'arcade',
       description: 'Play Frontline with everyone waiting on Claude',
@@ -402,14 +459,14 @@ export const register: Register = on => {
       return { text: 'Claude Arcade is off.' }
     }
     if (verb === 'view') {
-      if (arg !== 'blocks' && arg !== 'pixels' && arg !== 'auto') {
-        return { text: `Showing the game as ${view}. /arcade view blocks (any terminal), pixels (Ghostty, kitty) or auto.` }
+      if (arg !== 'blocks' && arg !== 'pixels' && arg !== 'window' && arg !== 'auto') {
+        return { text: `Showing the game as ${view}. /arcade view window (its own window), blocks (in any terminal), pixels (in Ghostty or kitty) or auto.` }
       }
       viewChoice = arg
       await $.store.set('view', arg)
-      const next: View = arg === 'auto' ? (isWindows ? 'blocks' : 'pixels') : arg
-      if (next !== view) await setView($, next)
-      return { text: `Claude Arcade shows the game as ${arg === 'auto' ? `${next} (auto)` : next}.` }
+      const next = await resolveView($)
+      if (next && next !== view) await setView($, next)
+      return { text: `Claude Arcade shows the game as ${arg === 'auto' ? `${next ?? view} (auto)` : arg}.` }
     }
     if (verb === 'server') {
       if (!arg || !/^https?:\/\//.test(arg)) return { text: `Arcade server: ${server || 'not set'}. /arcade server <https://…> changes it.` }
@@ -422,6 +479,9 @@ export const register: Register = on => {
     await $.store.set('isOn', true)
     // Opened by the person, the pane seats at any width: play right now.
     cancelTimer()
+    const next = await resolveView($)
+    if (!next) return { text: 'Claude Arcade draws the game in a terminal, or in its own window: /arcade view window, then /arcade.' }
+    adoptView(next)
     const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
     if (opened.isPlaced) await startPlaying($)
     return { text: `Claude Arcade is on: you drop into Frontline as ${name} while Claude works. /arcade off turns it off.` }
@@ -434,6 +494,7 @@ export const register: Register = on => {
       cancelTimer()
       phase = 'playing'
       $.ui.invalidate('ui.render')
+      if (playerWindowed) await postToPlayer($, 'notice', { text: '' })
     }
     armDropIn($)
     return next(e)
@@ -477,9 +538,7 @@ export const register: Register = on => {
     if (phase !== 'idle') {
       cancelTimer()
       phase = 'idle'
-      await sendInput($, { keys: [], fire: false, aim: false })
-      warmTimer?.cancel()
-      warmTimer = $.clock.after(KEEP_WARM_MS, () => stopPlayer())
+      await putAway($)
     }
     return next(e)
   })
@@ -499,8 +558,18 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
+    if (view === 'window') {
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Text bold>Claude Arcade · Frontline</Text>
+          <Text>{status ?? (phase === 'countdown' ? `Claude's done · back in ${countdown}` : 'Playing in the game window.')}</Text>
+          {hud ? <Text bold>{statusLine(hud)}</Text> : null}
+          <Text dimColor>Click the game to aim with the mouse · Esc frees the mouse · WASD moves · left click fires · /arcade off turns it off</Text>
+        </Box>
+      )
+    }
     if (e.surface !== 'terminal') {
-      return <Text>Claude Arcade shows the game in the terminal.</Text>
+      return <Text>Claude Arcade shows the game in the terminal, or in its own window: /arcade view window.</Text>
     }
     const { Image, Raster, Client } = $.ui.resolve(e)
     const controls =

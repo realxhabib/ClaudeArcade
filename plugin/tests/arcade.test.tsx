@@ -13,10 +13,10 @@ describe('claudearcade', () => {
     await ui.unmount()
   })
 
-  test('the desktop app gets a pointer to the terminal', async ($, on) => {
+  test('the desktop app is told how to play there', async ($, on) => {
     mock.store(on)
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'desktop', ...PANE })
-    expect(await ui.find({ type: 'Text', text: /in the terminal/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\/arcade view window/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -44,11 +44,26 @@ describe('claudearcade', () => {
     expect(codeOf({ key: 'pageup' })).toBeNull()
   })
 
-  test('/arcade view switches between blocks and pixels and remembers', async ($, on) => {
+  test('/arcade view switches between blocks, pixels and a window and remembers', async ($, on) => {
     mock.store(on)
+    on('session.surfaces', () => ({ value: ['terminal'] }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'darwin\n', stderr: '' } }))
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view blocks' }))).toContain('as blocks')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view' }))).toContain('Showing the game as blocks')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view pixels' }))).toContain('as pixels')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view window' }))).toContain('as window')
+    // Auto in a Mac terminal: back to real images in the pane.
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view auto' }))).toContain('as pixels (auto)')
+  })
+
+  test('on Windows, auto plays in a game window, and the pane keeps the score', async ($, on) => {
+    mock.store(on)
+    on('session.surfaces', () => ({ value: ['terminal'] }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'win32\n', stderr: '' } }))
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view auto' }))).toContain('as window (auto)')
+    const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /game window/ })).toBeDefined()
+    await ui.unmount()
   })
 
   test('the block picture fits the pane', () => {
