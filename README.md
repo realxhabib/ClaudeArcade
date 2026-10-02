@@ -9,30 +9,37 @@ When Claude has been working for two seconds, you drop in. Bots hold the seats n
 
 Both are games from [XApps](https://github.com/realxhabib/XApps), running as their real three.js selves.
 
-## Install
+## Play
 
-1. Install the plugin (in Claude Code):
+You need [Claude Code](https://claude.com/claude-code) (up to date: `claude update`), [Node.js](https://nodejs.org) (the LTS version), and Google Chrome or Microsoft Edge (every Windows PC already has Edge). Windows, macOS and Linux all work.
+
+1. **Install it.** In Claude Code, run:
 
    ```
    /plugin marketplace add realxhabib/ClaudeArcade
    /plugin install claudearcade@claudearcade
    ```
 
-2. Turn it on:
+2. **Restart Claude Code** (quit it and run `claude` again).
 
-   ```
-   /arcade
-   ```
+3. **Turn it on:** run `/arcade`, then press **1** for Frontline or **2** for Nova Rally.
 
-   The game renders in a browser running hidden in the background: Google Chrome or Microsoft Edge if you have one (every Windows PC has Edge), otherwise it downloads a headless Chrome once (about 90 MB).
+That's it. From now on, whenever Claude works for more than a couple of seconds you drop into the game, playing whoever else is waiting on Claude right now (bots fill the empty seats), and you're handed back when Claude is done. Click the game once so it gets your keys.
 
-To turn it off again, run `/arcade off`.
+| Command | What it does |
+| :- | :- |
+| `/arcade` | Turns it on and plays right now |
+| `/arcade off` | Turns it off |
+| `/arcade game` | Back to the game menu (or `/arcade game frontline`, `/arcade game rally`) |
+| `/arcade view window` | Where the game shows: `window`, `blocks`, `pixels` or `auto` (see below) |
+| `/arcade server <url>` | Plays on a different arcade server |
 
-## Requirements
+**If something's off**
 
-- Windows 10 or 11, macOS (Apple silicon or Intel), or Linux x64
-- [Node.js](https://nodejs.org) 18 or later on your `PATH`
-- Claude Code 2.1.287 or later, in a terminal with true colour
+- *`/arcade` isn't a command:* restart Claude Code, and check `/plugin` lists claudearcade.
+- *It says it needs Node.js:* install the LTS version from [nodejs.org](https://nodejs.org), then restart Claude Code.
+- *Nothing pops up:* it only drops in while Claude is working; run `/arcade` to play right away. On Windows the game window can open behind others: look for it on the taskbar.
+- *To update:* `claude plugin marketplace update claudearcade`, then `claude plugin update claudearcade@claudearcade`, and restart Claude Code. `/arcade` says the version you're on.
 
 ## Where the game shows
 
