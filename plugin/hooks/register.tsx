@@ -2,7 +2,13 @@
 // shared server with everyone else waiting on Claude, and hands you back when
 // it's done (or at once when Claude needs you). The intermission pattern: an
 // always-on game server (../../server), and here the real game running
-// headless (../player/player.mjs, Chrome) painting its frames into a pane.
+// headless (../player/player.mjs, Chrome or Edge) painting its frames into a pane.
+//
+// Two views: "pixels", real images, where the terminal draws them (Ghostty,
+// kitty), and "blocks", the picture in "▀" characters, two pixels per cell, in
+// any true-colour terminal (Windows Terminal among them). Windows starts on
+// blocks; elsewhere a terminal that turns out not to draw images switches to
+// blocks by itself. `/arcade view` picks one.
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -21,24 +27,43 @@ const DROP_IN_DELAY_MS = 2000
 const COUNTDOWN_SECONDS = 3
 /** After a hand-back the game keeps its seat this long, so the next turn drops straight back in. */
 const KEEP_WARM_MS = 90_000
-const CHROME_VERSIONS = 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
-const SYSTEM_CHROMES = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-]
+/** Image blits refused in a row before the pane decides this terminal can't draw images. */
+const DENIES_BEFORE_BLOCKS = 4
+/** The widest block picture (the Raster's 256-row limit at 16:9) and the narrowest worth drawing. */
+const MAX_BLOCK_COLUMNS = 455
+const MIN_BLOCK_COLUMNS = 40
 
 const NAME_STARTS = ['Idle', 'Queued', 'Pending', 'Async', 'Blocked', 'Waiting', 'Bored']
 const NAME_ENDS = ['Soldier', 'Sniper', 'Grunt', 'Medic', 'Recruit', 'Dev']
 
 type Timer = { cancel: () => void }
 type Stream = AsyncIterable<{ stream: 'stdout' | 'stderr'; text: string }> & { return?: () => unknown }
+type View = 'pixels' | 'blocks'
+type Grid = { cells: string; columns: number; rows: number; gen: number }
+
+/** The game's numbers (client/src/frontline/status.ts), for the status line under a block picture. */
+export type Hud = {
+  alive: boolean
+  hp: number
+  weapon: string
+  mag: number
+  reserve: number
+  reloading: boolean
+  respawnIn: number
+  killedBy: string | null
+  kills: number
+  deaths: number
+  best: { name: string; kills: number } | null
+  people: number
+}
 
 let isOn = false
 let name = 'QueuedSoldier'
 let server = DEFAULT_SERVER
+/** What the person picked with `/arcade view`; `auto` is blocks on Windows, pixels until refused elsewhere. */
+let viewChoice: 'auto' | View = 'auto'
+let view: View = 'pixels'
+let isWindows = false
 
 //   idle      not playing
 //   waiting   Claude is working; dropping in once the delay passes
@@ -50,10 +75,17 @@ let isDismissed = false
 let timer: Timer | null = null
 let countdown = 0
 
-// The running player: its output stream, the newest frame, its input socket.
+// The running player: its output stream, the newest frame (a PNG file or block cells), its input URL.
 let player: Stream | null = null
 let frame: { file: string; gen: number } | null = null
-let socket: string | null = null
+let grid: Grid | null = null
+let hud: Hud | null = null
+let inputUrl: string | null = null
+/** The block picture's size as last drawn: a frame of another size needs a redraw, not a blit. */
+let drawn: { columns: number; rows: number } | null = null
+/** The block width the pane has room for, last told to the player. */
+let blockColumns = 160
+let imageDenies = 0
 let warmTimer: Timer | null = null
 let status: string | null = null
 let setupWork: Promise<string | null> | null = null
@@ -126,14 +158,25 @@ function stopPlayer() {
   warmTimer = null
   const p = player
   player = null
-  frame = null
-  socket = null
+  clearFrames()
+  inputUrl = null
   void p?.return?.()
+}
+
+function clearFrames() {
+  frame = null
+  grid = null
+  hud = null
+  drawn = null
+  imageDenies = 0
 }
 
 /* ------------------------------------------------------------------ setup */
 
-/** Node 18+ runs the player; Chrome renders the game: the person's own, or a headless one downloaded once. */
+/**
+ * Node 18+ runs the player; a browser renders the game: Chrome or Edge if installed (every Windows
+ * PC has Edge), else Chrome's headless shell, downloaded once. ../player/setup.mjs does the looking.
+ */
 async function setup($: Engine): Promise<string | null> {
   setupWork ??= (async () => {
     const nodeVersion = await $.process.run(['node', '--version']).catch(() => null)
@@ -142,53 +185,41 @@ async function setup($: Engine): Promise<string | null> {
       status = 'Claude Arcade needs Node.js 18 or later on your PATH (nodejs.org).'
       return null
     }
-    for (const path of SYSTEM_CHROMES) if (await $.fs.exists(path)) return path
-    return downloadChrome($)
+    const dist = `${$.plugin.root}/dist`
+    const found = await runSetup($, ['find', dist])
+    if (!found) return null
+    isWindows = found.platform === 'win64'
+    if (viewChoice === 'auto' && isWindows) view = 'blocks'
+    if (found.browser) return found.browser
+    if (!found.platform) {
+      status = 'Claude Arcade needs Chrome or Edge installed here (no headless Chrome download for this system).'
+      return null
+    }
+    status = 'Downloading the game renderer (headless Chrome, about 90 MB, once)…'
+    $.ui.invalidate('ui.render')
+    const got = await runSetup($, ['download', dist], 15 * 60_000)
+    if (!got?.browser) return null
+    status = null
+    return got.browser
   })()
   const chrome = await setupWork
   if (!chrome) setupWork = null
   return chrome
 }
 
-async function downloadChrome($: Engine): Promise<string | null> {
-  const root = $.plugin.root
-  const platform = await platformName($)
-  if (!platform) {
-    status = 'Claude Arcade runs on macOS and Linux.'
-    return null
-  }
-  const binary = `${root}/dist/chrome-headless-shell-${platform}/chrome-headless-shell`
-  if (await $.fs.exists(binary)) return binary
-  status = 'Downloading the game renderer (headless Chrome, about 90 MB, once)…'
-  $.ui.invalidate('ui.render')
+async function runSetup($: Engine, args: string[], timeoutMs = 30_000): Promise<{ platform: string | null; browser: string | null } | null> {
+  const run = await $.process.run(['node', `${$.plugin.root}/player/setup.mjs`, ...args], { timeoutMs }).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
+  let result: { platform?: string | null; browser?: string | null; error?: string } = {}
   try {
-    const versions = await $.http.fetch(CHROME_VERSIONS)
-    const data = JSON.parse(versions.text) as {
-      channels: { Stable: { downloads: { 'chrome-headless-shell': { platform: string; url: string }[] } } }
-    }
-    const url = data.channels.Stable.downloads['chrome-headless-shell'].find(d => d.platform === platform)?.url
-    if (!url) throw new Error(`no headless Chrome for ${platform}`)
-    const zip = `${root}/dist/chrome.zip`
-    await $.process.run(['mkdir', '-p', `${root}/dist`])
-    const got = await $.process.run(['curl', '-fsSL', '-o', zip, url], { timeoutMs: 15 * 60_000 })
-    if (got.exitCode !== 0) throw new Error(got.stderr.trim() || 'download failed')
-    const unzipped = await $.process.run(['unzip', '-q', '-o', zip, '-d', `${root}/dist`], { timeoutMs: 5 * 60_000 })
-    await $.process.run(['rm', '-f', zip])
-    if (unzipped.exitCode !== 0) throw new Error(unzipped.stderr.trim() || 'unzip failed')
-    status = null
-    return binary
-  } catch (error) {
-    status = `Couldn't download headless Chrome: ${String(error instanceof Error ? error.message : error)}`
+    result = JSON.parse(run.stdout.trim().split('\n').pop() ?? '{}')
+  } catch {
+    result = { error: run.stderr.trim() || 'setup failed' }
+  }
+  if (run.exitCode !== 0 || result.error) {
+    status = `Couldn't set up the game renderer: ${result.error ?? run.stderr.trim()}`
     return null
   }
-}
-
-async function platformName($: Engine): Promise<string | null> {
-  const uname = await $.process.run(['uname', '-sm'])
-  const [system, arch] = uname.stdout.trim().split(' ')
-  if (system === 'Darwin') return arch === 'arm64' ? 'mac-arm64' : 'mac-x64'
-  if (system === 'Linux' && arch === 'x86_64') return 'linux64'
-  return null
+  return { platform: result.platform ?? null, browser: result.browser ?? null }
 }
 
 /* ------------------------------------------------------------------ the player */
@@ -204,14 +235,15 @@ async function runPlayer($: Engine) {
     $.ui.invalidate('ui.render')
     return
   }
-  const id = Math.random().toString(36).slice(2, 8)
-  const frames = `/tmp/claudearcade-${id}`
-  socket = `/tmp/claudearcade-${id}.sock`
   const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}`
   status = `Joining the Frontline server as ${name}…`
   $.ui.invalidate('ui.render')
   const stream = $.process.spawn({
-    argv: ['node', `${$.plugin.root}/player/player.mjs`, '--chrome', chrome, '--url', url, '--frames', frames, '--socket', socket, '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', '30'],
+    argv: [
+      'node', `${$.plugin.root}/player/player.mjs`, '--chrome', chrome, '--url', url,
+      '--view', view === 'blocks' ? 'cells' : 'pixels', '--columns', String(blockColumns),
+      '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', view === 'blocks' ? '20' : '30',
+    ],
   }) as unknown as Stream
   player = stream
   let pending = ''
@@ -221,24 +253,13 @@ async function runPlayer($: Engine) {
       const lines = (pending + text).split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
-        let msg: { frame?: string; gen?: number; error?: string; ready?: boolean }
+        let msg: PlayerMessage
         try {
           msg = JSON.parse(line)
         } catch {
           continue
         }
-        if (msg.frame && typeof msg.gen === 'number') {
-          const first = !frame
-          frame = { file: msg.frame, gen: msg.gen }
-          if (first) {
-            status = null
-            $.ui.invalidate('ui.render')
-          } else if (phase === 'playing' || phase === 'countdown') {
-            $.ui.blit({ requestId: PANE, key: 'view', source: { file: frame.file, format: 'png', generation: frame.gen } }).catch(() => {})
-          }
-        } else if (msg.error) {
-          $.ui.log(`claudearcade player: ${msg.error}`, { to: 'debug' })
-        }
+        if (player === stream) onPlayerMessage($, msg)
       }
     }
   } catch (error) {
@@ -246,8 +267,8 @@ async function runPlayer($: Engine) {
   }
   if (player === stream) {
     player = null
-    frame = null
-    socket = null
+    clearFrames()
+    inputUrl = null
     if (phase === 'playing') {
       status = 'The game stopped. /arcade restarts it.'
       $.ui.invalidate('ui.render')
@@ -255,11 +276,100 @@ async function runPlayer($: Engine) {
   }
 }
 
+type PlayerMessage = {
+  input?: string
+  frame?: string
+  cells?: string
+  columns?: number
+  rows?: number
+  gen?: number
+  hud?: Hud | null
+  error?: string
+}
+
+const isShowing = () => phase === 'playing' || phase === 'countdown'
+
+function onPlayerMessage($: Engine, msg: PlayerMessage) {
+  if (typeof msg.input === 'string') {
+    inputUrl = msg.input
+  } else if (msg.frame && typeof msg.gen === 'number') {
+    if (view !== 'pixels') return
+    const first = !frame
+    frame = { file: msg.frame, gen: msg.gen }
+    if (first) {
+      status = null
+      $.ui.invalidate('ui.render')
+    } else if (isShowing()) {
+      $.ui.blit({ requestId: PANE, key: 'view', source: { file: frame.file, format: 'png', generation: frame.gen } }).then(
+        result => onImageBlit($, result),
+        () => {},
+      )
+    }
+  } else if (typeof msg.cells === 'string' && msg.columns && msg.rows && typeof msg.gen === 'number') {
+    if (view !== 'blocks') return
+    grid = { cells: msg.cells, columns: msg.columns, rows: msg.rows, gen: msg.gen }
+    // The first picture, or one of a new size, is a redraw; the rest repaint the mounted Raster.
+    if (!drawn || drawn.columns !== grid.columns || drawn.rows !== grid.rows) {
+      status = null
+      $.ui.invalidate('ui.render')
+    } else if (isShowing()) {
+      $.ui.blit({ requestId: PANE, key: 'blocks', cells: grid.cells, columns: grid.columns, rows: grid.rows }).catch(() => {})
+    }
+  } else if (msg.hud !== undefined) {
+    hud = msg.hud
+    if (view === 'blocks' && isShowing()) $.ui.invalidate('ui.render')
+  } else if (msg.error) {
+    $.ui.log(`claudearcade player: ${msg.error}`, { to: 'debug' })
+  }
+}
+
+/** An Image blit this terminal refused, time after time, means it draws the alt text, not pictures: go to blocks. */
+function onImageBlit($: Engine, result: { deny?: string }) {
+  if (!result.deny) {
+    imageDenies = 0
+    return
+  }
+  imageDenies++
+  if (imageDenies === 1) $.ui.log(`claudearcade: image refused: ${result.deny}`, { to: 'debug' })
+  if (imageDenies >= DENIES_BEFORE_BLOCKS && viewChoice === 'auto' && view === 'pixels' && isShowing()) {
+    status = 'This terminal doesn’t show images here; drawing the game in block characters (/arcade view pixels switches back).'
+    void setView($, 'blocks')
+  }
+}
+
+async function setView($: Engine, next: View) {
+  view = next
+  clearFrames()
+  $.ui.invalidate('ui.render')
+  await postToPlayer($, 'view', { view: next === 'blocks' ? 'cells' : 'pixels', columns: blockColumns })
+}
+
 type Input = { keys: string[]; fire: boolean; aim: boolean; look?: { dx: number; dy: number } }
 
 async function sendInput($: Engine, input: Input) {
-  if (!socket || !player) return
-  await $.http.fetch('http://player/input', { method: 'POST', body: JSON.stringify(input), socketPath: socket }).catch(() => {})
+  await postToPlayer($, 'input', input)
+}
+
+async function postToPlayer($: Engine, route: 'input' | 'view', body: unknown) {
+  if (!inputUrl || !player) return
+  await $.http.fetch(`${inputUrl}/${route}`, { method: 'POST', body: JSON.stringify(body) }).catch(() => {})
+}
+
+/** The block picture that fits the pane: as wide as its body, no taller than leaves two lines of text. */
+export function fitBlocks(bodyColumns: number, bodyRows: number): number {
+  const byHeight = Math.floor(((Math.max(4, bodyRows) - 2) * 2 * WIDTH) / HEIGHT)
+  return Math.max(MIN_BLOCK_COLUMNS, Math.min(MAX_BLOCK_COLUMNS, bodyColumns, byHeight))
+}
+
+/** The line under a block picture: what the game's own HUD says, which blocks are too coarse to show. */
+export function statusLine(h: Hud | null): string {
+  if (!h) return 'Frontline · endless free for all'
+  const score = `${h.kills} ${h.kills === 1 ? 'kill' : 'kills'} · ${h.deaths} ${h.deaths === 1 ? 'death' : 'deaths'}`
+  const best = h.best ? ` · top rival ${h.best.name} ${h.best.kills}` : ''
+  const people = h.people > 1 ? ` · ${h.people} people here` : ''
+  if (!h.alive) return `Killed${h.killedBy ? ` by ${h.killedBy}` : ''} · back in ${h.respawnIn}s · ${score}${best}`
+  const ammo = h.reloading ? 'reloading' : `${h.mag}/${h.reserve}`
+  return `♥ ${h.hp} · ${h.weapon} ${ammo} · ${score}${best}${people}`
 }
 
 /* ------------------------------------------------------------------ hooks */
@@ -272,10 +382,12 @@ export const register: Register = on => {
     if (savedName !== name) await $.store.set('name', name)
     const savedServer = await $.store.get('server')
     if (typeof savedServer === 'string' && savedServer) server = savedServer
+    const savedView = await $.store.get('view')
+    if (savedView === 'blocks' || savedView === 'pixels') view = viewChoice = savedView
     await $.command.register({
       name: 'arcade',
       description: 'Play Frontline with everyone waiting on Claude',
-      argumentHint: '[off | server <url>]',
+      argumentHint: '[off | view blocks|pixels|auto | server <url>]',
     })
     return next(e)
   })
@@ -288,6 +400,16 @@ export const register: Register = on => {
       await handBack($)
       stopPlayer()
       return { text: 'Claude Arcade is off.' }
+    }
+    if (verb === 'view') {
+      if (arg !== 'blocks' && arg !== 'pixels' && arg !== 'auto') {
+        return { text: `Showing the game as ${view}. /arcade view blocks (any terminal), pixels (Ghostty, kitty) or auto.` }
+      }
+      viewChoice = arg
+      await $.store.set('view', arg)
+      const next: View = arg === 'auto' ? (isWindows ? 'blocks' : 'pixels') : arg
+      if (next !== view) await setView($, next)
+      return { text: `Claude Arcade shows the game as ${arg === 'auto' ? `${next} (auto)` : next}.` }
     }
     if (verb === 'server') {
       if (!arg || !/^https?:\/\//.test(arg)) return { text: `Arcade server: ${server || 'not set'}. /arcade server <https://…> changes it.` }
@@ -378,18 +500,45 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     if (e.surface !== 'terminal') {
-      return <Text>Claude Arcade shows the game in the terminal, in Ghostty or kitty.</Text>
+      return <Text>Claude Arcade shows the game in the terminal.</Text>
     }
-    const { Image, Client } = $.ui.resolve(e)
-    if (!frame) {
+    const { Image, Raster, Client } = $.ui.resolve(e)
+    const controls =
+      phase === 'countdown' ? (
+        <Text bold>Claude's done · back in {countdown}</Text>
+      ) : (
+        <Text dimColor>Click the game · WASD moves · mouse or arrows aim · left click fires · right click aims down sights · Shift sprints · Space jumps · R reloads · G grenade</Text>
+      )
+    const joining = (
+      <Box flexDirection="column" gap={1}>
+        <Text bold>Claude Arcade · Frontline</Text>
+        <Text>{status ?? `Joining the Frontline server as ${name}…`}</Text>
+        <Text dimColor>/arcade off turns it off.</Text>
+      </Box>
+    )
+
+    if (view === 'blocks') {
+      // One cell per two pixels: the player captures the page at the width the pane has room for.
+      const fit = fitBlocks(e.props.bodyColumns, e.props.scroll.bodyRows)
+      if (fit !== blockColumns) {
+        blockColumns = fit
+        void postToPlayer($, 'view', { view: 'cells', columns: fit })
+      }
+      if (!grid) return joining
+      drawn = { columns: grid.columns, rows: grid.rows }
       return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Claude Arcade · Frontline</Text>
-          <Text>{status ?? `Joining the Frontline server as ${name}…`}</Text>
-          <Text dimColor>/arcade off turns it off.</Text>
+        <Box flexDirection="column">
+          <Raster key="blocks" columns={grid.columns} rows={grid.rows} cells={grid.cells} />
+          <Box position="absolute" top={0} left={0}>
+            <Client key="input" module="./input.tsx" props={{ width: WIDTH, height: HEIGHT }} width={grid.columns} height={grid.rows} />
+          </Box>
+          <Text bold>{statusLine(hud)}</Text>
+          {controls}
         </Box>
       )
     }
+
+    if (!frame) return joining
     // Terminal cells are about twice as tall as they are wide.
     const columns = Math.max(20, Math.min(255, e.props.bodyColumns))
     const rows = Math.max(1, Math.round((columns * HEIGHT) / WIDTH / 2))
@@ -400,11 +549,7 @@ export const register: Register = on => {
         <Box position="absolute" top={0} left={0}>
           <Client key="input" module="./input.tsx" props={{ width: WIDTH, height: HEIGHT }} width={columns} height={rows} />
         </Box>
-        {phase === 'countdown' ? (
-          <Text bold>Claude's done · back in {countdown}</Text>
-        ) : (
-          <Text dimColor>Click the game · WASD moves · mouse or arrows aim · left click fires · right click aims down sights · Shift sprints · Space jumps · R reloads · G grenade</Text>
-        )}
+        {controls}
       </Box>
     )
   })

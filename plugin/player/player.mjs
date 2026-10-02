@@ -1,34 +1,47 @@
 #!/usr/bin/env node
 // Claude Arcade player: the arcade's equivalent of intermission's patched Doom
-// engine. Runs the real game in headless Chrome (driven over a pipe, no npm
-// dependencies), writes each frame as a PNG the terminal paints into the
-// pane, and turns the pane's keys and mouse into the game's input.
+// engine. Runs the real game in headless Chrome or Edge (driven over a pipe, no
+// npm dependencies), hands each frame to the pane, and turns the pane's keys
+// and mouse into the game's input. Two ways to show a frame:
+//   pixels  a PNG file the terminal paints itself (Ghostty, kitty)
+//   cells   "▀" block characters, two pixels per cell, for any terminal with
+//           true colour (Windows Terminal, iTerm2, VS Code's)
 //
-//   node player.mjs --chrome <path> --url <game url> --frames <dir> --socket <path>
+//   node player.mjs --chrome <path> --url <game url>
+//                   [--view pixels|cells] [--columns 160] [--frames <dir>]
 //                   [--width 640] [--height 360] [--fps 30] [--sound]
 //
-// stdout, one JSON line each: {"ready":true} once the page loaded,
-//   {"frame":"<path>","gen":<n>} per frame, {"error":"..."} on trouble.
-// Input: HTTP on the unix socket, POST /input with
-//   { keys: string[] (KeyboardEvent.code held), fire, aim: boolean,
-//     look: { dx, dy } (pixels of mouse movement since the last post) }.
+// stdout, one JSON line each: {"input":"http://127.0.0.1:<port>/<token>"}
+//   first, {"ready":true} once the page loaded, per frame
+//   {"frame":"<path>","gen":n} or {"cells":"<base64>","columns","rows","gen"},
+//   {"hud":{...}} when the game's numbers change (src/frontline/status.ts),
+//   {"error":"..."} on trouble.
+// Input: HTTP on localhost, behind the printed URL's random token:
+//   POST <url>/input { keys: string[] (KeyboardEvent.code held), fire, aim:
+//     boolean, look: { dx, dy } (pixels of mouse movement since the last post) }
+//   POST <url>/view { view: "pixels" | "cells", columns } switches on the fly.
 // Killing this process (or its parent going away) ends Chrome too (its pipe closes).
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { decodePng, toCells } from "./cells.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const WIDTH = Number(args.width ?? 640);
 const HEIGHT = Number(args.height ?? 360);
 const FRAME_MS = 1000 / Number(args.fps ?? 30);
-if (!args.chrome || !args.url || !args.frames || !args.socket) {
-  out({ error: "usage: player.mjs --chrome <path> --url <url> --frames <dir> --socket <path>" });
+if (!args.chrome || !args.url) {
+  out({ error: "usage: player.mjs --chrome <path> --url <url> [--view pixels|cells] [--columns n]" });
   process.exit(2);
 }
-mkdirSync(args.frames, { recursive: true });
+const frames = args.frames ? String(args.frames) : join(tmpdir(), `claudearcade-${process.pid}`);
+mkdirSync(frames, { recursive: true });
+let view = args.view === "cells" ? "cells" : "pixels";
+let columns = clampColumns(args.columns ?? 160);
 const profile = join(tmpdir(), `claudearcade-profile-${process.pid}`);
 
 const chromeArgs = [
@@ -64,10 +77,11 @@ chrome.on("error", (error) => {
   process.exit(1);
 });
 process.on("SIGTERM", shutdown);
-// The mod ending its loop kills us; if the whole session died instead, notice we were orphaned.
+// The mod ending its loop kills us; if the whole session died instead, notice we were orphaned
+// (reparented on macOS and Linux; on Windows the parent's pid just stops answering).
 const parent = process.ppid;
 setInterval(() => {
-  if (process.ppid !== parent) shutdown();
+  if (process.ppid !== parent || !isAlive(parent)) shutdown();
 }, 2000).unref();
 process.on("SIGINT", shutdown);
 
@@ -120,27 +134,64 @@ async function start() {
   listeners.set("Page.loadEventFired", () => out({ ready: true }));
   await cdp("Page.navigate", { url: args.url }, session);
   void captureLoop();
+  void hudLoop();
   // Keep the page "focused" so it gets keys and keeps rendering.
   await cdp("Emulation.setFocusEmulationEnabled", { enabled: true }, session).catch(() => {});
 }
 
-/** One exact-size PNG of the page per frame (the screencast resizes frames unpredictably in headless mode). */
+/**
+ * One exact-size PNG of the page per frame (the screencast resizes frames unpredictably in headless
+ * mode). For cells the page is captured scaled down to one pixel per column.
+ */
 async function captureLoop() {
-  const clip = { x: 0, y: 0, width: WIDTH, height: HEIGHT, scale: 1 };
+  let lastCells = "";
   while (!stopped) {
     const began = Date.now();
     try {
+      const cells = view === "cells";
+      const scale = cells ? columns / WIDTH : 1;
+      const clip = { x: 0, y: 0, width: WIDTH, height: HEIGHT, scale };
       const { data } = await cdp("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: false, optimizeForSpeed: true }, session);
-      // Two files, alternating: the terminal reads one while the next is written.
-      const path = join(args.frames, `frame-${gen % 2}.png`);
-      writeFileSync(path, Buffer.from(data, "base64"));
-      gen += 1;
-      out({ frame: path, gen });
+      const png = Buffer.from(data, "base64");
+      if (cells) {
+        const grid = toCells(decodePng(png));
+        // A still picture (the death screen, a pause) needn't cross the pipe again.
+        if (grid.cells !== lastCells) {
+          lastCells = grid.cells;
+          gen += 1;
+          out({ ...grid, gen });
+        }
+      } else {
+        lastCells = "";
+        // Two files, alternating: the terminal reads one while the next is written.
+        const path = join(frames, `frame-${gen % 2}.png`);
+        writeFileSync(path, png);
+        gen += 1;
+        out({ frame: path, gen });
+      }
     } catch (error) {
       out({ error: `capture: ${error.message}` });
       await sleep(500);
     }
     await sleep(Math.max(0, FRAME_MS - (Date.now() - began)));
+  }
+}
+
+/** The game's numbers for the pane's status line, sent when they change. */
+async function hudLoop() {
+  let last = "";
+  while (!stopped) {
+    try {
+      const { result } = await cdp("Runtime.evaluate", { expression: "JSON.stringify(window.__arcadeHud ? window.__arcadeHud() : null)", returnByValue: true }, session);
+      const text = typeof result?.value === "string" ? result.value : "null";
+      if (text !== last) {
+        last = text;
+        out({ hud: JSON.parse(text) });
+      }
+    } catch {
+      // the page is between loads
+    }
+    await sleep(500);
   }
 }
 
@@ -194,34 +245,58 @@ async function button(which, down) {
   );
 }
 
-rmSync(args.socket, { force: true });
+// Localhost TCP (a unix socket isn't a thing on Windows); the random token keeps other local
+// programs and web pages from typing into the game.
+const token = randomBytes(16).toString("hex");
 const server = createServer((req, res) => {
-  if (req.method === "POST" && req.url === "/input") {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => {
-      let input = null;
-      try {
-        input = JSON.parse(body);
-      } catch {
-        // ignore a bad post
-      }
-      applyInput(input ?? {}).then(
-        () => res.end("{}"),
-        (error) => res.end(JSON.stringify({ error: error.message })),
-      );
-    });
+  const route = req.method === "POST" && req.url?.startsWith(`/${token}/`) ? req.url.slice(token.length + 2) : null;
+  if (route !== "input" && route !== "view") {
+    res.statusCode = 404;
+    res.end();
     return;
   }
-  res.statusCode = 404;
-  res.end();
+  let body = "";
+  req.on("data", (c) => (body = (body + c).slice(0, 16_384)));
+  req.on("end", () => {
+    let msg = null;
+    try {
+      msg = JSON.parse(body);
+    } catch {
+      // ignore a bad post
+    }
+    if (route === "view") {
+      if (msg?.view === "cells" || msg?.view === "pixels") view = msg.view;
+      if (msg?.columns !== undefined) columns = clampColumns(msg.columns);
+      res.end("{}");
+      return;
+    }
+    applyInput(msg ?? {}).then(
+      () => res.end("{}"),
+      (error) => res.end(JSON.stringify({ error: error.message })),
+    );
+  });
 });
-server.listen(args.socket);
+server.listen(0, "127.0.0.1", () => out({ input: `http://127.0.0.1:${server.address().port}/${token}` }));
 
 /* ---------------------------------------------------------------- plumbing */
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
+}
+
+/** Cells are one pixel wide; the Raster takes up to 512 columns (and 256 rows: 455 columns at 16:9). */
+function clampColumns(value) {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) ? Math.max(16, Math.min(Math.floor((256 * 2 * WIDTH) / HEIGHT), 512, n)) : 160;
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
 }
 
 function parseArgs(list) {
@@ -249,7 +324,7 @@ let stopped = false;
 function cleanup() {
   try {
     server.close();
-    rmSync(args.socket, { force: true });
+    rmSync(frames, { recursive: true, force: true });
     rmSync(profile, { recursive: true, force: true });
   } catch {
     // best effort

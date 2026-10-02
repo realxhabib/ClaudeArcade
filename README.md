@@ -20,16 +20,24 @@ Frontline is the first-person shooter from [XApps](https://github.com/realxhabib
    /arcade
    ```
 
-   The first time, it downloads a headless Chrome to render the game (about 90 MB), unless Google Chrome or Chromium is already installed.
+   The game renders in a browser running hidden in the background: Google Chrome or Microsoft Edge if you have one (every Windows PC has Edge), otherwise it downloads a headless Chrome once (about 90 MB).
 
 To turn it off again, run `/arcade off`.
 
 ## Requirements
 
-- macOS (Apple silicon or Intel) or Linux x64
+- Windows 10 or 11, macOS (Apple silicon or Intel), or Linux x64
 - [Node.js](https://nodejs.org) 18 or later on your `PATH`
-- [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can show the game's pixels
-- Claude Code 2.1.287 or later
+- Claude Code 2.1.287 or later, in a terminal with true colour
+
+## Pixels or blocks
+
+The game shows in one of two ways:
+
+- **Pixels**, the real picture, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code.
+- **Blocks**, the picture drawn with `▀` characters, each one two coloured pixels, in any terminal with true colour: Windows Terminal, iTerm2, Terminal.app, VS Code's. Blocks are coarse, so your health, ammo, kills and the leading rival are written in a line under the picture.
+
+On Windows it starts in blocks. Elsewhere it starts in pixels and switches to blocks by itself if your terminal turns out not to draw images. To choose yourself, run `/arcade view blocks`, `/arcade view pixels`, or `/arcade view auto` to go back to choosing automatically. Make the pane wider for a sharper block picture.
 
 ## Controls
 
@@ -92,7 +100,7 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 | --- | --- |
 | `server/` | The always-on lobby: 8 seats (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). The match is endless; an empty lobby starts over after 30 s. Node + `ws`, and it serves the client too. |
 | `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`) and the endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up). |
-| `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, `hooks/input.tsx` catches keys and the mouse over the picture, and `player/player.mjs` runs the game in headless Chrome, writes each frame as a PNG the terminal paints, and turns the pane's input into the game's. |
+| `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in headless Chrome or Edge, hands each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`), and turns the pane's input, posted to it on localhost behind a random token, into the game's. `player/setup.mjs` finds or downloads the browser. |
 
 ## Development
 
@@ -109,6 +117,7 @@ Checks:
 cd server && npm test                 # the lobby
 cd client && npm run typecheck && npm test
 claude plugin validate plugin && claude plugin test plugin
+node --test plugin/player/*.test.mjs  # the block picture
 ```
 
 ## Licenses

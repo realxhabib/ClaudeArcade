@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { codeOf } from '../hooks/input.tsx'
+import { fitBlocks, statusLine } from '../hooks/register.tsx'
 
 const PANE = { component: 'Pane', requestId: 'claudearcade', props: { title: 'Claude Arcade · Frontline', isFocused: true, bodyColumns: 100, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } } as const
 
@@ -41,5 +42,30 @@ describe('claudearcade', () => {
     expect(codeOf({ key: '3' })).toBe('Digit3')
     expect(codeOf({ key: '9' })).toBeNull()
     expect(codeOf({ key: 'pageup' })).toBeNull()
+  })
+
+  test('/arcade view switches between blocks and pixels and remembers', async ($, on) => {
+    mock.store(on)
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view blocks' }))).toContain('as blocks')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view' }))).toContain('Showing the game as blocks')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view pixels' }))).toContain('as pixels')
+  })
+
+  test('the block picture fits the pane', () => {
+    // As wide as the pane where it's tall enough...
+    expect(fitBlocks(100, 40)).toBe(100)
+    // ...narrower where its height would overflow (two lines kept for text)...
+    expect(fitBlocks(200, 30)).toBe(Math.floor((28 * 2 * 640) / 360))
+    // ...and never past the Raster's limits.
+    expect(fitBlocks(1000, 500)).toBe(455)
+    expect(fitBlocks(10, 40)).toBe(40)
+  })
+
+  test('the status line says what the HUD would', () => {
+    const base = { alive: true, hp: 83, weapon: 'Kestrel AR-7', mag: 21, reserve: 90, reloading: false, respawnIn: 0, killedBy: null, kills: 3, deaths: 1, best: { name: 'Havoc', kills: 5 }, people: 2 }
+    expect(statusLine(base)).toBe('♥ 83 · Kestrel AR-7 21/90 · 3 kills · 1 death · top rival Havoc 5 · 2 people here')
+    expect(statusLine({ ...base, alive: false, hp: 0, killedBy: 'Rook', respawnIn: 2, people: 1 })).toBe('Killed by Rook · back in 2s · 3 kills · 1 death · top rival Havoc 5')
+    expect(statusLine({ ...base, reloading: true, kills: 1, people: 1 })).toContain('Kestrel AR-7 reloading · 1 kill ·')
+    expect(statusLine(null)).toContain('endless free for all')
   })
 })

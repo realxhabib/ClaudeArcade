@@ -26,6 +26,7 @@ import { FrontlineLoading } from "./loading";
 import { TIERS, assetsCover, detectTier, lower, type AssetLevel, type Tier } from "./quality";
 import { lineOfSight } from "./physics";
 import { formatClock, isWinner, parseDoc } from "./rules";
+import { arcadeHud, type ArcadeHud } from "./status";
 import type { Settings } from "./settings";
 import { NET_HZ, PacketLink, RELAY_HZ } from "./net";
 import { WEAPONS } from "./weapons";
@@ -273,6 +274,15 @@ export function MatchView({ settings, onSettings }: { settings: Settings; onSett
   useRoomEvent<{ seat: number; kills: number; deaths: number }[]>("arcade.scores", (rows) => {
     if (Array.isArray(rows)) game.setArcadeScores(rows);
   });
+  // Claude Arcade's player reads the numbers for the pane's status line.
+  useEffect(() => {
+    if (!isArcade(xapps)) return;
+    const w = window as unknown as { __arcadeHud?: () => ArcadeHud | null };
+    w.__arcadeHud = () => arcadeHud(game);
+    return () => {
+      delete w.__arcadeHud;
+    };
+  }, [game, xapps]);
   useEffect(() => xapps.state.onChange((s) => game.onDoc(s)), [game, xapps]);
   // Catch up on the state in case a change landed before we subscribed.
   useEffect(() => {
