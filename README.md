@@ -8,10 +8,11 @@ Frontline is the first-person shooter from [XApps](https://github.com/realxhabib
 
 ## Install
 
-1. Install the plugin:
+1. Install the plugin (in Claude Code):
 
    ```
-   /plugin install claudearcade --marketplace realxhabib/ClaudeArcade
+   /plugin marketplace add realxhabib/ClaudeArcade
+   /plugin install claudearcade@claudearcade
    ```
 
 2. Turn it on:
