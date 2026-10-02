@@ -96,7 +96,7 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.4.4 is on')
+    expect(reply).toContain('Claude Arcade 0.4.5 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()

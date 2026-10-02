@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.4'
+const VERSION = '0.4.5'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.

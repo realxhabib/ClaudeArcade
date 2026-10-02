@@ -36,6 +36,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodePng, toCells } from "./cells.mjs";
+import { raiseWindow } from "./raise.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const WIDTH = Number(args.width ?? 640);
@@ -149,6 +150,9 @@ async function start() {
   // The app window opened on the game already.
   if (WINDOWED) {
     out({ ready: true });
+    // The window opens behind whatever has focus on Windows: lift it once it exists (and again in
+    // case the first try came before it did).
+    void raiseWindow(chrome.pid).then((n) => (n ? undefined : sleep(1500).then(() => raiseWindow(chrome.pid))));
     return;
   }
   await cdp("Page.navigate", { url: args.url }, session);
@@ -180,6 +184,8 @@ async function setWindow(state) {
     await cdp("Page.navigate", { url }, session);
   }
   await cdp("Page.bringToFront", {}, session);
+  // Chrome's bringToFront can't get past Windows' foreground lock from the background.
+  await raiseWindow(chrome.pid);
 }
 
 async function notice(text) {
