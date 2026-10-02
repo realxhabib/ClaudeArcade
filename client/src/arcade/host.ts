@@ -29,7 +29,15 @@ function toPlayers(players: LobbyPlayer[]): PlayerInfo[] {
   }));
 }
 
-export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
+/** The games the arcade runs, as the server and the menu name them. */
+export type GameId = "frontline" | "rally";
+
+const APPS: Record<GameId, LaunchContext["app"]> = {
+  frontline: { id: "frontline", slug: "frontline", name: "Frontline" },
+  rally: { id: "nova-rally", slug: "nova-rally", name: "Nova Rally" },
+};
+
+export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome, game: GameId = "frontline") {
   const pair = createMemoryTransportPair();
   const me = welcome.players.find((p) => p.id === welcome.you);
   let players = toPlayers(welcome.players);
@@ -38,14 +46,14 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
   const startedAt = Date.now();
 
   const match = (): LaunchContext["match"] => ({
-    id: `arcade-frontline-${welcome.session}`,
+    id: `arcade-${game}-${welcome.session}`,
     mode: "live",
     status: "active",
     scoring: "high",
-    seed: `arcade-frontline-${welcome.session}`,
+    seed: `arcade-${game}-${welcome.session}`,
     players,
     seat: me ? me.seat : -1,
-    // Frontline reads `arcade` to run drop-in seats and the endless free for all.
+    // The games read `arcade` to run drop-in seats and their endless modes.
     settings: { arcade: true },
     minPlayers: 1,
     maxPlayers: players.length,
@@ -60,7 +68,7 @@ export function startArcadeHost(lobby: LobbyConnection, welcome: Welcome) {
 
   const context = (): LaunchContext => ({
     purpose: "match",
-    app: { id: "frontline", slug: "frontline", name: "Frontline" },
+    app: APPS[game],
     user: me
       ? { id: me.id, handle: me.handle, name: me.name, avatarUrl: null }
       : { id: "spectator", handle: "spectator", name: "Spectator", avatarUrl: null },

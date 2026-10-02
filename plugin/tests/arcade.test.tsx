@@ -9,7 +9,7 @@ describe('claudearcade', () => {
   test('the pane says it is joining until the first frame arrives', async ($, on) => {
     mock.store(on)
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
-    expect(await ui.find({ type: 'Text', text: /Joining the Frontline server as/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Joining the arcade as/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -81,7 +81,9 @@ describe('claudearcade', () => {
     expect(statusLine(base)).toBe('♥ 83 · Kestrel AR-7 21/90 · 3 kills · 1 death · top rival Havoc 5 · 2 people here')
     expect(statusLine({ ...base, alive: false, hp: 0, killedBy: 'Rook', respawnIn: 2, people: 1 })).toBe('Killed by Rook · back in 2s · 3 kills · 1 death · top rival Havoc 5')
     expect(statusLine({ ...base, reloading: true, kills: 1, people: 1 })).toContain('Kestrel AR-7 reloading · 1 kill ·')
-    expect(statusLine(null)).toContain('endless free for all')
+    expect(statusLine(null)).toBe('Claude Arcade')
+    // Nova Rally and the menu say it themselves.
+    expect(statusLine({ ...base, game: 'rally', text: 'Race 3 · Saturn Rings · 2nd of 8 · lap 1/2 · 27 pts' })).toBe('Race 3 · Saturn Rings · 2nd of 8 · lap 1/2 · 27 pts')
   })
 
   test("a server that isn't an arcade server is named as such, not drawn", async ($, on) => {
@@ -92,10 +94,17 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.3.1 is on')
+    expect(reply).toContain('Claude Arcade 0.4.0 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('/arcade game picks the game, or brings back the menu', async ($, on) => {
+    mock.store(on)
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game rally' }))).toContain('plays Nova Rally now')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game' }))).toContain('game menu next time')
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game tetris' }))).toContain('/arcade game frontline')
   })
 })

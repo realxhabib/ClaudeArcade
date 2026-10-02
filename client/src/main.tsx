@@ -1,19 +1,22 @@
 /**
- * Claude Arcade's Frontline: joins the arcade lobby on this server, then runs
- * the game against the in-page arcade host. `?name=` is the player's name in
- * the lobby; `?pane` marks the hidden browser that paints a terminal pane
- * (mouse look from cursor movement, no pointer lock). A seat freeing up for a
- * spectator reloads the page into it.
+ * Claude Arcade: a menu of the arcade's games (`?game=` skips it), then the
+ * game against the in-page arcade host, joined to that game's matches on this
+ * server. `?name=` is the player's name in the lobby; `?pane` marks the hidden
+ * browser that paints a terminal pane (mouse look from cursor movement, no
+ * pointer lock). A seat freeing up for a spectator reloads the page into it.
  */
 
 import { XAppsProvider } from "@xapps/sdk/react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { startArcadeHost } from "./arcade/host";
+import { startArcadeHost, type GameId } from "./arcade/host";
 import { LobbyConnection } from "./arcade/lobby";
+import { GameMenu, parseGame } from "./arcade/menu";
 import { FrontlineApp } from "./frontline/app";
 import { FrontlineLoading } from "./frontline/loading";
 import { setArcadeMode } from "./frontline/input";
+import { ArcadeRally } from "./rally/arcade";
+import { RallyLoading } from "./rally/loading";
 import "./globals.css";
 
 setArcadeMode(new URLSearchParams(window.location.search).has("pane"));
@@ -38,7 +41,7 @@ function ArcadeNotice() {
 
 type Joined = { transport: ReturnType<typeof startArcadeHost>["transport"] };
 
-function Arcade() {
+function Arcade({ game }: { game: GameId }) {
   const [joined, setJoined] = useState<Joined | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +49,7 @@ function Arcade() {
     let live = true;
     const params = new URLSearchParams(window.location.search);
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${scheme}://${window.location.host}/lobby?name=${encodeURIComponent(params.get("name") ?? "")}`;
+    const url = `${scheme}://${window.location.host}/lobby?game=${game}&name=${encodeURIComponent(params.get("name") ?? "")}`;
     LobbyConnection.open(url).then(
       ({ lobby, welcome }) => {
         if (!live) return lobby.close();
@@ -55,7 +58,7 @@ function Arcade() {
           setError("Lost the arcade server. Reconnecting…");
           setTimeout(() => window.location.reload(), 3000);
         });
-        setJoined({ transport: startArcadeHost(lobby, welcome).transport });
+        setJoined({ transport: startArcadeHost(lobby, welcome, game).transport });
       },
       (e: Error) => {
         if (!live) return;
@@ -66,17 +69,36 @@ function Arcade() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [game]);
 
+  const loading = game === "rally" ? <RallyLoading /> : <FrontlineLoading />;
   if (error) {
     return <div className="m-auto p-6 text-center text-sm text-ink-300">{error}</div>;
   }
-  if (!joined) return <FrontlineLoading />;
+  if (!joined) return loading;
   return (
-    <XAppsProvider options={{ transport: joined.transport, gestures: false }} fallback={<FrontlineLoading />}>
-      <FrontlineApp />
+    <XAppsProvider options={{ transport: joined.transport, gestures: false }} fallback={loading}>
+      {game === "rally" ? <ArcadeRally /> : <FrontlineApp />}
     </XAppsProvider>
   );
+}
+
+function Root() {
+  const [game, setGame] = useState<GameId | null>(() => parseGame(new URLSearchParams(window.location.search).get("game")));
+  if (!game) {
+    return (
+      <GameMenu
+        onPick={(picked) => {
+          // In the address, so a reload (a seat freeing up) comes back to the same game.
+          const url = new URL(window.location.href);
+          url.searchParams.set("game", picked);
+          window.history.replaceState(null, "", url);
+          setGame(picked);
+        }}
+      />
+    );
+  }
+  return <Arcade game={game} />;
 }
 
 createRoot(document.getElementById("root")!).render(
@@ -85,7 +107,7 @@ createRoot(document.getElementById("root")!).render(
       className="relative isolate flex min-h-dvh w-full flex-col overflow-hidden text-ink-50"
       style={{ "--accent-from": "#f2b544", "--accent-to": "#e2553a" } as React.CSSProperties}
     >
-      <Arcade />
+      <Root />
       <ArcadeNotice />
     </div>
   </StrictMode>,

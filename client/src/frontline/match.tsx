@@ -277,8 +277,8 @@ export function MatchView({ settings, onSettings }: { settings: Settings; onSett
   // Claude Arcade's player reads the numbers for the pane's status line.
   useEffect(() => {
     if (!isArcade(xapps)) return;
-    const w = window as unknown as { __arcadeHud?: () => ArcadeHud | null };
-    w.__arcadeHud = () => arcadeHud(game);
+    const w = window as unknown as { __arcadeHud?: () => (Partial<ArcadeHud> & { game: "frontline" }) | null };
+    w.__arcadeHud = () => ({ game: "frontline", ...arcadeHud(game) });
     return () => {
       delete w.__arcadeHud;
     };

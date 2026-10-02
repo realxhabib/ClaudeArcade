@@ -1,6 +1,7 @@
-// Claude Arcade: drops you into a Frontline deathmatch while Claude works, on a
-// shared server with everyone else waiting on Claude, and hands you back when
-// it's done (or at once when Claude needs you). The intermission pattern: an
+// Claude Arcade: drops you into a game while Claude works (Frontline, the
+// shooter, or Nova Rally, the kart racer: a menu picks the first time, and
+// `/arcade game` switches), on a shared server with everyone else waiting on
+// Claude, and hands you back when it's done (or at once when Claude needs you). The intermission pattern: an
 // always-on game server (../../server), and here the real game running
 // headless (../player/player.mjs, Chrome or Edge) painting its frames into a pane.
 //
@@ -17,9 +18,9 @@ import type { EngineInterface, Register } from 'claude-code'
 type Engine = EngineInterface
 
 const PANE = 'claudearcade'
-const TITLE = 'Claude Arcade · Frontline'
+const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.3.1'
+const VERSION = '0.4.0'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -45,8 +46,27 @@ type Stream = AsyncIterable<{ stream: 'stdout' | 'stderr'; text: string }> & { r
 type View = 'pixels' | 'blocks' | 'window'
 type Grid = { cells: string; columns: number; rows: number; gen: number }
 
-/** The game's numbers (client/src/frontline/status.ts), for the status line under a block picture. */
+type Game = 'frontline' | 'rally'
+const GAME_NAMES: Record<Game, string> = { frontline: 'Frontline', rally: 'Nova Rally' }
+const CONTROLS: Record<Game | 'menu', { pane: string; window: string }> = {
+  menu: { pane: 'Press 1 for Frontline or 2 for Nova Rally', window: 'Pick a game in the window' },
+  frontline: {
+    pane: 'Click the game · WASD moves · mouse or arrows aim · left click fires · right click aims down sights · Shift sprints · Space jumps · R reloads · G grenade',
+    window: 'Click the game to aim with the mouse · Esc frees the mouse · WASD moves · left click fires',
+  },
+  rally: {
+    pane: 'Click the game · W or ↑ thrust · A D or ← → steer · Space drifts · E fires your item · C looks back',
+    window: 'W or ↑ thrust · A D or ← → steer · Space drifts · E fires your item · C looks back',
+  },
+}
+
+/**
+ * What the game reports for the status line: Frontline's numbers (client/src/frontline/status.ts),
+ * or a ready-made `text` (Nova Rally, the menu), and which `game` is on (null on the menu).
+ */
 export type Hud = {
+  game?: Game | null
+  text?: string
   alive: boolean
   hp: number
   weapon: string
@@ -64,6 +84,8 @@ export type Hud = {
 let isOn = false
 let name = 'QueuedSoldier'
 let server = DEFAULT_SERVER
+/** The game picked last (the menu skips to it); null shows the menu. */
+let game: Game | null = null
 /** What the person picked with `/arcade view`; `auto` is a window on Windows or without a terminal, else pixels until refused. */
 let viewChoice: 'auto' | View = 'auto'
 let view: View = 'pixels'
@@ -293,8 +315,8 @@ async function runPlayer($: Engine) {
     return
   }
   // `pane`: the hidden browser painting the pane takes mouse look from the pane, not pointer lock.
-  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${windowed ? '' : '&pane=1'}`
-  status = windowed ? `Opening the game window as ${name}…` : `Joining the Frontline server as ${name}…`
+  const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${game ? `&game=${game}` : ''}${windowed ? '' : '&pane=1'}`
+  status = windowed ? `Opening the game window as ${name}…` : `Joining the arcade as ${name}…`
   $.ui.invalidate('ui.render')
   playerWindowed = windowed
   const stream = $.process.spawn({
@@ -392,8 +414,16 @@ function onPlayerMessage($: Engine, msg: PlayerMessage) {
       $.ui.blit({ requestId: PANE, key: 'blocks', cells: grid.cells, columns: grid.columns, rows: grid.rows }).catch(() => {})
     }
   } else if (msg.hud !== undefined) {
+    const switched = (msg.hud?.game ?? null) !== (hud?.game ?? null)
     hud = msg.hud
-    if (view !== 'pixels' && isShowing()) $.ui.invalidate('ui.render')
+    // The menu's pick (or a switch in the browser) is the game next time.
+    const picked = msg.hud?.game
+    if ((picked === 'frontline' || picked === 'rally') && picked !== game) {
+      game = picked
+      void $.store.set('game', picked)
+    }
+    // Blocks and the window show the numbers; every view names the game and its controls.
+    if ((view !== 'pixels' || switched) && isShowing()) $.ui.invalidate('ui.render')
   } else if (msg.error) {
     $.ui.log(`claudearcade player: ${msg.error}`, { to: 'debug' })
   }
@@ -442,13 +472,26 @@ export function fitBlocks(bodyColumns: number, bodyRows: number): number {
 
 /** The line under a block picture: what the game's own HUD says, which blocks are too coarse to show. */
 export function statusLine(h: Hud | null): string {
-  if (!h) return 'Frontline · endless free for all'
+  if (h?.text) return h.text
+  if (!h) return game ? `${GAME_NAMES[game]} · joining` : 'Claude Arcade'
+  if (typeof h.kills !== 'number') return GAME_NAMES[h.game ?? 'frontline']
   const score = `${h.kills} ${h.kills === 1 ? 'kill' : 'kills'} · ${h.deaths} ${h.deaths === 1 ? 'death' : 'deaths'}`
   const best = h.best ? ` · top rival ${h.best.name} ${h.best.kills}` : ''
   const people = h.people > 1 ? ` · ${h.people} people here` : ''
   if (!h.alive) return `Killed${h.killedBy ? ` by ${h.killedBy}` : ''} · back in ${h.respawnIn}s · ${score}${best}`
   const ammo = h.reloading ? 'reloading' : `${h.mag}/${h.reserve}`
   return `♥ ${h.hp} · ${h.weapon} ${ammo} · ${score}${best}${people}`
+}
+
+/** The game on screen: what the page last reported, else the one it was opened on (the menu if none). */
+function shownGame(): Game | 'menu' {
+  if (hud) return hud.game ?? 'menu'
+  return game ?? 'menu'
+}
+
+function gameTitle(): string {
+  const shown = shownGame()
+  return shown === 'menu' ? TITLE : `${TITLE} · ${GAME_NAMES[shown]}`
 }
 
 /* ------------------------------------------------------------------ hooks */
@@ -461,12 +504,14 @@ export const register: Register = on => {
     if (savedName !== name) await $.store.set('name', name)
     const savedServer = await $.store.get('server')
     if (typeof savedServer === 'string' && savedServer) server = savedServer
+    const savedGame = await $.store.get('game')
+    game = savedGame === 'frontline' || savedGame === 'rally' ? savedGame : null
     const savedView = await $.store.get('view')
     if (savedView === 'blocks' || savedView === 'pixels' || savedView === 'window') view = viewChoice = savedView
     await $.command.register({
       name: 'arcade',
-      description: 'Play Frontline with everyone waiting on Claude',
-      argumentHint: '[off | view blocks|pixels|auto | server <url>]',
+      description: 'Play Frontline or Nova Rally with everyone waiting on Claude',
+      argumentHint: '[off | game frontline|rally | view window|blocks|pixels|auto | server <url>]',
     })
     return next(e)
   })
@@ -490,6 +535,15 @@ export const register: Register = on => {
       if (next && next !== view) await setView($, next)
       return { text: `Claude Arcade shows the game as ${arg === 'auto' ? `${next ?? view} (auto)` : arg}.` }
     }
+    if (verb === 'game') {
+      if (arg && arg !== 'frontline' && arg !== 'rally') return { text: 'Games: /arcade game frontline, /arcade game rally, or /arcade game for the menu.' }
+      game = (arg as Game | undefined) ?? null
+      await $.store.set('game', game)
+      // The running game restarts into the pick (or the menu) at the next drop-in, or now if it's showing.
+      stopPlayer()
+      if (isShowing()) void runPlayer($)
+      return { text: game ? `Claude Arcade plays ${GAME_NAMES[game]} now.` : 'Claude Arcade shows the game menu next time.' }
+    }
     if (verb === 'server') {
       if (!arg || !/^https?:\/\//.test(arg)) return { text: `Arcade server: ${server || 'not set'}. /arcade server <https://…> changes it.` }
       server = arg
@@ -506,7 +560,7 @@ export const register: Register = on => {
     adoptView(next)
     const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
     if (opened.isPlaced) await startPlaying($)
-    return { text: `Claude Arcade ${VERSION} is on: you drop into Frontline as ${name} while Claude works, shown as ${view === 'window' ? 'a game window' : view}, on ${server || 'no server yet'}. /arcade off turns it off.` }
+    return { text: `Claude Arcade ${VERSION} is on: you drop into ${game ? GAME_NAMES[game] : 'the game menu'} as ${name} while Claude works, shown as ${view === 'window' ? 'a game window' : view}, on ${server || 'no server yet'}. /arcade off turns it off.` }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -583,10 +637,10 @@ export const register: Register = on => {
     if (view === 'window') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Claude Arcade · Frontline</Text>
+          <Text bold>{gameTitle()}</Text>
           <Text>{status ?? (phase === 'countdown' ? `Claude's done · back in ${countdown}` : 'Playing in the game window.')}</Text>
           {hud ? <Text bold>{statusLine(hud)}</Text> : null}
-          <Text dimColor>Click the game to aim with the mouse · Esc frees the mouse · WASD moves · left click fires · /arcade off turns it off</Text>
+          <Text dimColor>{CONTROLS[shownGame()].window} · /arcade game switches games · /arcade off turns it off</Text>
         </Box>
       )
     }
@@ -598,12 +652,12 @@ export const register: Register = on => {
       phase === 'countdown' ? (
         <Text bold>Claude's done · back in {countdown}</Text>
       ) : (
-        <Text dimColor>Click the game · WASD moves · mouse or arrows aim · left click fires · right click aims down sights · Shift sprints · Space jumps · R reloads · G grenade</Text>
+        <Text dimColor>{CONTROLS[shownGame()].pane}</Text>
       )
     const joining = (
       <Box flexDirection="column" gap={1}>
-        <Text bold>Claude Arcade · Frontline</Text>
-        <Text>{status ?? `Joining the Frontline server as ${name}…`}</Text>
+        <Text bold>{gameTitle()}</Text>
+        <Text>{status ?? `Joining the arcade as ${name}…`}</Text>
         <Text dimColor>/arcade off turns it off.</Text>
       </Box>
     )
@@ -635,7 +689,7 @@ export const register: Register = on => {
     const rows = Math.max(1, Math.round((columns * HEIGHT) / WIDTH / 2))
     return (
       <Box flexDirection="column">
-        <Image key="view" source={{ file: frame.file, format: 'png', generation: frame.gen }} columns={columns} rows={rows} alt="Frontline" />
+        <Image key="view" source={{ file: frame.file, format: 'png', generation: frame.gen }} columns={columns} rows={rows} alt={gameTitle()} />
         {/* Laid over the picture, so keys and clicks land on the game. */}
         <Box position="absolute" top={0} left={0}>
           <Client key="input" module="./input.tsx" props={{ width: WIDTH, height: HEIGHT }} width={columns} height={rows} />

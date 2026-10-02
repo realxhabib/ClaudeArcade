@@ -23,7 +23,9 @@
 //     boolean, look: { dx, dy } (pixels of mouse movement since the last post) }
 //   POST <url>/view { view: "pixels" | "cells", columns } switches on the fly
 //     (headless only; a window stays a window).
-//   POST <url>/window { state: "normal" | "minimized" } shows or hides the window.
+//   POST <url>/window { state: "normal" | "minimized" } shows or hides the window. Minimized, it
+//     also leaves the game (a hidden page stops running, and other players would wait on it if it
+//     ran their bots); shown again, it rejoins where it was (the same game, not the menu).
 //   POST <url>/notice { text } shows a line over the game ("" clears it).
 // Killing this process (or its parent going away) ends Chrome too (its pipe closes).
 
@@ -155,12 +157,29 @@ async function start() {
   await cdp("Emulation.setFocusEmulationEnabled", { enabled: true }, session).catch(() => {});
 }
 
-/** Shows (and brings to the front) or minimizes the game window. */
+/** Where the window was before it was put away, to rejoin there. */
+let awayFrom = null;
+
+/** Shows (and brings to the front) or minimizes the game window, leaving the game while it's away. */
 async function setWindow(state) {
   if (!WINDOWED || !target) return;
   const { windowId } = await cdp("Browser.getWindowForTarget", { targetId: target });
-  await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: state === "minimized" ? "minimized" : "normal" } });
-  if (state !== "minimized") await cdp("Page.bringToFront", {}, session);
+  if (state === "minimized") {
+    if (awayFrom === null) {
+      const { result } = await cdp("Runtime.evaluate", { expression: "location.href", returnByValue: true }, session);
+      awayFrom = typeof result?.value === "string" && result.value.startsWith("http") ? result.value : args.url;
+      await cdp("Page.navigate", { url: "about:blank" }, session);
+    }
+    await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } });
+    return;
+  }
+  await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+  if (awayFrom !== null) {
+    const url = awayFrom;
+    awayFrom = null;
+    await cdp("Page.navigate", { url }, session);
+  }
+  await cdp("Page.bringToFront", {}, session);
 }
 
 async function notice(text) {

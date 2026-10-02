@@ -1,7 +1,8 @@
-// The arcade server: serves the Frontline client and runs the always-on
-// matches on the same port (WebSocket at /lobby?name=...). Usage: node index.mjs
+// The arcade server: serves the game client and runs the always-on matches of
+// each game on the same port (WebSocket at /lobby?game=frontline|rally&name=...).
+// Usage: node index.mjs
 // PORT (default 8787), CLIENT_DIR (default ../client/dist) and MAX_MATCHES
-// (default 25, 8 players each) from the env.
+// (default 25 per game, 8 players each) from the env.
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -31,8 +32,25 @@ const TYPES = {
   ".md": "text/markdown; charset=utf-8",
 };
 
-const arcade = new Arcade({ maxMatches: Number(process.env.MAX_MATCHES ?? DEFAULT_MAX_MATCHES) });
-setInterval(() => arcade.tick(), 1000);
+/** Each game has its own matches; a client names its game (Frontline when it doesn't say). */
+const GAMES = ["frontline", "rally"];
+const maxMatches = Number(process.env.MAX_MATCHES ?? DEFAULT_MAX_MATCHES);
+const arcades = Object.fromEntries(GAMES.map((game) => [game, new Arcade({ maxMatches })]));
+setInterval(() => Object.values(arcades).forEach((a) => a.tick()), 1000);
+
+/** /health: everyone online across the games (`players`, `online`), and each game's matches. */
+function health() {
+  const games = Object.fromEntries(GAMES.map((game) => [game, arcades[game].health()]));
+  const all = Object.values(games);
+  return {
+    ok: true,
+    online: all.reduce((n, g) => n + g.online, 0),
+    players: all.flatMap((g) => g.players),
+    watching: all.reduce((n, g) => n + g.watching, 0),
+    games,
+    load: lastLoad,
+  };
+}
 
 // Load over the last second, for /health: messages in and out, and kilobytes sent.
 const load = { in: 0, out: 0, bytes: 0 };
@@ -48,7 +66,7 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   if (url.pathname === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ...arcade.health(), load: lastLoad }));
+    res.end(JSON.stringify(health()));
     return;
   }
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -72,10 +90,11 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", "http://x");
   if (url.pathname !== "/lobby") return socket.destroy();
-  wss.handleUpgrade(req, socket, head, (ws) => accept(ws, url.searchParams.get("name")));
+  const game = GAMES.includes(url.searchParams.get("game")) ? url.searchParams.get("game") : "frontline";
+  wss.handleUpgrade(req, socket, head, (ws) => accept(ws, arcades[game], url.searchParams.get("name")));
 });
 
-function accept(ws, name) {
+function accept(ws, arcade, name) {
   let budget = MESSAGES_PER_SECOND;
   const refill = setInterval(() => (budget = MESSAGES_PER_SECOND), 1000);
   const conn = {

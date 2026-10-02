@@ -1,10 +1,13 @@
 # Claude Arcade
 
-A Claude Code plugin that drops you into a **Frontline** deathmatch while Claude works, on a shared server with everyone else waiting on Claude, and hands you back when it's done.
+A Claude Code plugin that drops you into a multiplayer game while Claude works, on a shared server with everyone else waiting on Claude, and hands you back when it's done. Two games, picked from a menu the first time:
 
-When Claude has been working for two seconds, a pane opens beside the transcript and you drop into an endless eight-player free-for-all: no clock and no kill limit, just your kills and deaths where the timer would be. Bots hold the seats nobody is in, and you take one over when you arrive. When Claude finishes, there's a three-second countdown and you're handed back, and a bot takes your soldier. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer.
+- **Frontline**, a first-person shooter: an endless eight-player free-for-all, no clock and no kill limit, just your kills and deaths where the timer would be.
+- **Nova Rally**, kart racing in space: two-lap races with items and drifts, one after another on every track in turn, with points adding up race to race.
 
-Frontline is the first-person shooter from [XApps](https://github.com/realxhabib/XApps), running as its real three.js game.
+When Claude has been working for two seconds, you drop in. Bots hold the seats nobody is in, and you take one over when you arrive (in Nova Rally, someone arriving mid-race watches it and races from the next one). When Claude finishes, there's a three-second countdown and you're handed back, and a bot takes your seat. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer. `/arcade game` switches games (`/arcade game frontline`, `/arcade game rally`, or no name for the menu).
+
+Both are games from [XApps](https://github.com/realxhabib/XApps), running as their real three.js selves.
 
 ## Install
 
@@ -41,7 +44,9 @@ It picks for you: a window on Windows or without a terminal, pixels elsewhere, s
 
 ## Controls
 
-Click the game first so it gets your keys (in the game window, clicking also captures the mouse for aiming; Esc frees it).
+Click the game first so it gets your keys (in Frontline's game window, clicking also captures the mouse for aiming; Esc frees it). On the menu, press 1 or 2.
+
+**Frontline**
 
 | | |
 | :- | :- |
@@ -55,6 +60,17 @@ Click the game first so it gets your keys (in the game window, clicking also cap
 | Grenade | G |
 | Crouch | C |
 | Swap weapon | Q, or 1 and 2 |
+
+**Nova Rally**
+
+| | |
+| :- | :- |
+| Thrust | W or ↑ (hold it as the last light goes out for a rocket start) |
+| Steer | A and D, or ← and → |
+| Brake | S or ↓ |
+| Drift (and tricks off ramps) | Space, held while turning |
+| Use your item | E |
+| Look back | C |
 
 In the pane, terminals report key presses but not releases, so a key counts as held until its auto-repeat stops.
 
@@ -107,7 +123,7 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 | Path | What it is |
 | --- | --- |
 | `server/` | The always-on matches (`arcade.mjs` opens and closes them; `lobby.mjs` is one match): 8 seats each (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). Matches are endless; an empty one starts over after 30 s. Node + `ws`, and it serves the client too. |
-| `client/` | Frontline, built with Vite. It talks to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus drop-in seats (`Game.setSeats`) and the endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up). |
+| `client/` | The menu and both games, built with Vite. They talk to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus the arcade's modes: Frontline's drop-in seats (`Game.setSeats`) and endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up), and Nova Rally's endless races (`src/rally/arcade.tsx`: the shared match document holds the race being run, and whoever holds the lowest seat calls the next one on the seats as they are then). The server runs each game's matches separately (`/lobby?game=`). |
 | `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in Chrome or Edge: in its own window, or headless, handing each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`) and turning the pane's input into the game's. The mod controls it over localhost behind a random token. `player/setup.mjs` finds or downloads the browser. |
 
 ## Development
@@ -117,7 +133,7 @@ cd client && npm install && npm run build && cd ..
 cd server && npm install && node index.mjs     # http://localhost:8787
 ```
 
-Open http://localhost:8787 in two browser windows to play against each other in the lobby. To try the mod against it, run `claude --plugin-dir ./plugin`, then `/arcade server http://localhost:8787` and `/arcade`.
+Open http://localhost:8787 in two browser windows to play against each other (the menu picks the game; `?game=frontline` or `?game=rally` skips it). To try the mod against it, run `claude --plugin-dir ./plugin`, then `/arcade server http://localhost:8787` and `/arcade`.
 
 Checks:
 
@@ -130,4 +146,4 @@ node --test plugin/player/*.test.mjs  # the block picture
 
 ## Licenses
 
-The code is MIT, as in [`LICENSE`](LICENSE). The game's textures, sky and soldier model are CC0, with their sources in [`client/public/first-party/frontline/CREDITS.md`](client/public/first-party/frontline/CREDITS.md).
+The code is MIT, as in [`LICENSE`](LICENSE). Frontline's textures, sky and soldier model are CC0, with their sources in [`client/public/first-party/frontline/CREDITS.md`](client/public/first-party/frontline/CREDITS.md). Nova Rally draws everything in code, and its music and sounds (`client/public/audio/nova-rally/`) are rendered from its own synthesizer (`client/src/rally/audio.ts`).

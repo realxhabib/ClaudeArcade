@@ -1,0 +1,272 @@
+{
+ "version": 1,
+ "sampleRate": 44100,
+ "sfx": {
+  "countdown": {
+   "start": 0.02506,
+   "dur": 0.9761451247165533
+  },
+  "go": {
+   "start": 1.2512,
+   "dur": 1.1962358276643992
+  },
+  "rocketStart": {
+   "start": 2.69744,
+   "dur": 0.8293877551020409
+  },
+  "stall": {
+   "start": 3.77683,
+   "dur": 1.0550113378684807
+  },
+  "boost": {
+   "start": 5.08184,
+   "dur": 0.7681179138321995
+  },
+  "boostPad": {
+   "start": 6.09995,
+   "dur": 0.6911111111111111
+  },
+  "miniTurbo1": {
+   "start": 7.04107,
+   "dur": 0.7172335600907029
+  },
+  "miniTurbo2": {
+   "start": 8.0083,
+   "dur": 0.8462585034013606
+  },
+  "miniTurbo3": {
+   "start": 9.10456,
+   "dur": 1.0225396825396826
+  },
+  "driftStart": {
+   "start": 10.3771,
+   "dur": 0.25405895691609975
+  },
+  "itemBox": {
+   "start": 10.88116,
+   "dur": 0.9901133786848073
+  },
+  "roulette": {
+   "start": 12.12127,
+   "dur": 1.3533106575963718
+  },
+  "rouletteStop": {
+   "start": 13.72458,
+   "dur": 1.0751020408163265
+  },
+  "fire": {
+   "start": 15.04968,
+   "dur": 0.5336507936507937
+  },
+  "missile": {
+   "start": 15.83333,
+   "dur": 0.9803401360544218
+  },
+  "mineDrop": {
+   "start": 17.06367,
+   "dur": 0.5472108843537415
+  },
+  "shieldUp": {
+   "start": 17.86088,
+   "dur": 1.0121315192743763
+  },
+  "shieldPop": {
+   "start": 19.12302,
+   "dur": 0.5295238095238095
+  },
+  "explosion": {
+   "start": 19.90254,
+   "dur": 1.261201814058957
+  },
+  "spinout": {
+   "start": 21.41374,
+   "dur": 0.8065759637188209
+  },
+  "empZap": {
+   "start": 22.47032,
+   "dur": 0.59
+  },
+  "singularity": {
+   "start": 23.31032,
+   "dur": 1.5539909297052155
+  },
+  "warp": {
+   "start": 25.11431,
+   "dur": 1.4897052154195012
+  },
+  "cloak": {
+   "start": 26.85401,
+   "dur": 1.0007482993197279
+  },
+  "wallHit": {
+   "start": 28.10476,
+   "dur": 0.6435147392290249
+  },
+  "bump": {
+   "start": 28.99828,
+   "dur": 0.5190022675736962
+  },
+  "land": {
+   "start": 29.76728,
+   "dur": 0.6278231292517007
+  },
+  "trick": {
+   "start": 30.6451,
+   "dur": 0.8401360544217688
+  },
+  "coin": {
+   "start": 31.73524,
+   "dur": 0.9450113378684808
+  },
+  "jump": {
+   "start": 32.93025,
+   "dur": 0.5321088435374149
+  },
+  "fall": {
+   "start": 33.71236,
+   "dur": 0.9899546485260771
+  },
+  "respawn": {
+   "start": 34.95231,
+   "dur": 1.1071428571428572
+  },
+  "lap": {
+   "start": 36.30946,
+   "dur": 0.9834013605442177
+  },
+  "finalLap": {
+   "start": 37.54286,
+   "dur": 2.2110657596371883
+  },
+  "finish": {
+   "start": 40.00392,
+   "dur": 2.273219954648526
+  },
+  "win": {
+   "start": 42.52714,
+   "dur": 2.551496598639456
+  },
+  "lose": {
+   "start": 45.32864,
+   "dur": 2.1115419501133785
+  },
+  "positionUp": {
+   "start": 47.69018,
+   "dur": 0.5984353741496599
+  },
+  "positionDown": {
+   "start": 48.53862,
+   "dur": 0.25587301587301586
+  },
+  "select": {
+   "start": 49.04449,
+   "dur": 0.45292517006802724
+  },
+  "click": {
+   "start": 49.74741,
+   "dur": 0.04972789115646259
+  },
+  "whoosh": {
+   "start": 50.04714,
+   "dur": 0.31802721088435376
+  }
+ },
+ "music": {
+  "mars": {
+   "normal": {
+    "file": "music-mars.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 48.03456
+   },
+   "final": {
+    "file": "music-mars-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 44.479
+   }
+  },
+  "belt": {
+   "normal": {
+    "file": "music-belt.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 51.23456
+   },
+   "final": {
+    "file": "music-belt-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 47.44195
+   }
+  },
+  "saturn": {
+   "normal": {
+    "file": "music-saturn.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 54.11905
+   },
+   "final": {
+    "file": "music-saturn-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 50.11279
+   }
+  },
+  "nebula": {
+   "normal": {
+    "file": "music-nebula.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 51.23456
+   },
+   "final": {
+    "file": "music-nebula-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 47.44195
+   }
+  },
+  "luna": {
+   "normal": {
+    "file": "music-luna.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 45.74884
+   },
+   "final": {
+    "file": "music-luna-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 42.36259
+   }
+  },
+  "sun": {
+   "normal": {
+    "file": "music-sun.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 44.68571
+   },
+   "final": {
+    "file": "music-sun-final.mp3",
+    "loopStart": 0.03447,
+    "loopEnd": 41.37814
+   }
+  },
+  "europa": {
+   "normal": {
+    "file": "music-europa.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 54.8917
+   },
+   "final": {
+    "file": "music-europa-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 50.82821
+   }
+  },
+  "menu": {
+   "normal": {
+    "file": "music-menu.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 71.14567
+   },
+   "final": {
+    "file": "music-menu-final.mp3",
+    "loopStart": 0.03456,
+    "loopEnd": 65.87819
+   }
+  }
+ }
+}
