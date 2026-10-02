@@ -2,7 +2,7 @@
 # One command on the server itself (no SSH keys or local tools needed, so it
 # works from Windows): in DigitalOcean's web console, as root,
 #   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh
-# or, for HTTPS on a domain pointing at the server,
+# (no curl? wget -qO- <same url> | sh) or, for HTTPS on a domain pointing at the server,
 #   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | sh -s arcade.example.com
 # and, when the server already runs something on port 8787, another port:
 #   curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/server/install.sh | PORT=8788 sh
@@ -17,7 +17,10 @@ if [ "$(id -u)" -ne 0 ]; then
 	echo "Run it as root (sudo sh, or the root console)." >&2
 	exit 1
 fi
-command -v git >/dev/null || { apt-get update -q && apt-get install -yq git; }
+# Minimal images can lack git or curl (this script may have come in through wget).
+if ! command -v git >/dev/null || ! command -v curl >/dev/null; then
+	apt-get update -q && apt-get install -yq git curl ca-certificates
+fi
 rm -rf "$SRC"
 git clone -q --depth 1 "$REPO" "$SRC"
 # The game client, built once by GitHub Actions (.github/workflows/client.yml), when it was built
