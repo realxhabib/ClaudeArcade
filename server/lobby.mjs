@@ -23,12 +23,15 @@ const seatId = (i) => `seat-${i}`;
 
 export class Lobby {
   /**
-   * @param {{ now?: () => number, id?: number, nextSession?: () => number }} [options]
+   * @param {{ now?: () => number, id?: number, nextSession?: () => number, bots?: "fill" | "solo" }} [options]
    *   `id` numbers the match on its server; `nextSession` hands out session numbers unique across
-   *   the server's matches (each game is seeded from its session).
+   *   the server's matches (each game is seeded from its session). `bots`: "fill" (default) puts a
+   *   bot in every seat nobody holds; "solo" keeps someone alone company with one bot (in the
+   *   highest free seat) and has none once a second person is in, the free seats left empty.
    */
   constructor(options = {}) {
     this.now = options.now ?? Date.now;
+    this.bots = options.bots ?? "fill";
     this.id = options.id ?? 1;
     this.nextSession = options.nextSession ?? (() => this.session + 1);
     /** @type {Array<{ conn: any, name: string } | null>} */
@@ -48,16 +51,19 @@ export class Lobby {
     this.counted = new Set();
   }
 
-  /** The XApps-style player list every game is launched with. */
+  /** The XApps-style player list every game is launched with: the people, and the bots. */
   players() {
-    return this.seats.map((s, i) => ({
-      id: seatId(i),
-      seat: i,
-      name: s ? s.name : BOT_NAMES[i],
-      handle: s ? s.name : BOT_NAMES[i].toLowerCase(),
-      avatarUrl: null,
-      isBot: !s,
-    }));
+    const bot = this.bots === "solo" ? (this.online().length <= 1 ? this.botSeat() : -1) : null;
+    return this.seats.flatMap((s, i) => {
+      if (!s && bot !== null && i !== bot) return [];
+      return [{ id: seatId(i), seat: i, name: s ? s.name : BOT_NAMES[i], handle: s ? s.name : BOT_NAMES[i].toLowerCase(), avatarUrl: null, isBot: !s }];
+    });
+  }
+
+  /** A lone player's bot sits in the highest free seat (people take the lowest). */
+  botSeat() {
+    for (let i = SEATS - 1; i >= 0; i--) if (!this.seats[i]) return i;
+    return -1;
   }
 
   online() {

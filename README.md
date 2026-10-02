@@ -2,10 +2,10 @@
 
 A Claude Code plugin that drops you into a multiplayer game while Claude works, on a shared server with everyone else waiting on Claude, and hands you back when it's done. Two games, picked from a menu the first time:
 
-- **Frontline**, a first-person shooter: an endless eight-player free-for-all, no clock and no kill limit, just your kills and deaths where the timer would be.
+- **Frontline**, a first-person shooter: an endless free-for-all for up to eight people, no clock and no kill limit, just your kills and deaths where the timer would be. It's people against people: alone, one bot keeps you company, and it leaves as soon as someone else joins.
 - **Nova Rally**, kart racing in space: two-lap races with items and drifts, one after another on every track in turn, with points adding up race to race.
 
-When Claude has been working for two seconds, you drop in. Bots hold the seats nobody is in, and you take one over when you arrive (in Nova Rally, someone arriving mid-race watches it and races from the next one). When Claude finishes, there's a three-second countdown and you're handed back, and a bot takes your seat. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer. `/arcade game` switches games (`/arcade game frontline`, `/arcade game rally`, or no name for the menu).
+When Claude has been working for two seconds, you drop in (in Nova Rally, someone arriving mid-race watches it and races from the next one; CPU racers fill the rest of the grid). When Claude finishes, there's a three-second countdown and you're handed back. If Claude needs you, say for a permission prompt, you're handed back at once and dropped in again after you answer. `/arcade game` switches games (`/arcade game frontline`, `/arcade game rally`, or no name for the menu).
 
 Both are games from [XApps](https://github.com/realxhabib/XApps), running as their real three.js selves.
 
@@ -24,7 +24,7 @@ You need [Claude Code](https://claude.com/claude-code) (up to date: `claude upda
 
 3. **Turn it on:** run `/arcade`, then press **1** for Frontline or **2** for Nova Rally.
 
-That's it. From now on, whenever Claude works for more than a couple of seconds you drop into the game on the Claude Arcade server, playing whoever else is waiting on Claude right now (bots fill the empty seats), and you're handed back when Claude is done. Click the game once so it gets your keys.
+That's it. From now on, whenever Claude works for more than a couple of seconds you drop into the game on the Claude Arcade server, playing whoever else is waiting on Claude right now, and you're handed back when Claude is done. Click the game once so it gets your keys.
 
 | Command | What it does |
 | :- | :- |
@@ -111,7 +111,7 @@ Already running something else on the server? The arcade can share it: it only n
 
 ### How many players
 
-Each match seats 8 (bots fill the empty seats). When every match is full, the next person starts a new match on the same server, and an extra match closes once it has sat empty for 30 seconds, so people play rather than watch. Watching only happens at the server's limit, `MAX_MATCHES` (default 25, so 200 players); the person watching gets the next seat that frees up in any match.
+Each match seats 8 (in Frontline, a bot only when someone is alone; in Nova Rally, CPU racers fill the grid). When every match is full, the next person starts a new match on the same server, and an extra match closes once it has sat empty for 30 seconds, so people play rather than watch. Watching only happens at the server's limit, `MAX_MATCHES` (default 25, so 200 players); the person watching gets the next seat that frees up in any match.
 
 The server barely works for it: players' games connect to each other directly where they can, and the server only relays the moves of those whose networks block that. Measured with every player relayed (`node server/load.mjs 240`, the worst case): 200 players in 25 matches took about a fifth of one CPU core and 110 MB of memory, sending about 4.7 MB/s. So the smallest droplet holds the default limit; `/health` shows the matches and the load.
 
@@ -133,7 +133,7 @@ Oracle may reclaim an Always Free VM that sits nearly idle for a week; upgrading
 
 | Path | What it is |
 | --- | --- |
-| `server/` | The always-on matches (`arcade.mjs` opens and closes them; `lobby.mjs` is one match): 8 seats each (bots fill empty ones), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). Matches are endless; an empty one starts over after 30 s. Node + `ws`, and it serves the client too. |
+| `server/` | The always-on matches (`arcade.mjs` opens and closes them; `lobby.mjs` is one match): 8 seats each (Frontline: one bot for someone alone, otherwise empty seats stay empty; Nova Rally: bots fill them), compare-and-set match state, packet relay, and the score (each seat's kills and deaths since its current occupant arrived). Matches are endless; an empty one starts over after 30 s. Node + `ws`, and it serves the client too. |
 | `client/` | The menu and both games, built with Vite. They talk to the lobby through an in-page host (`src/arcade/`) that stands in for XApps, so the game code is the same as on XApps plus the arcade's modes: Frontline's drop-in seats (`Game.setSeats`) and endless match (the kill ledger keeps recent kills and a per-seat life count, so it never fills up), and Nova Rally's endless races (`src/rally/arcade.tsx`: the shared match document holds the race being run, and whoever holds the lowest seat calls the next one on the seats as they are then). The server runs each game's matches separately (`/lobby?game=`). |
 | `plugin/` | The Claude Code mod. `hooks/register.tsx` is the drop-in/hand-back lifecycle and the pane, and `hooks/input.tsx` catches keys and the mouse over the picture. `player/player.mjs` runs the game in Chrome or Edge: in its own window, or headless, handing each frame to the pane as a PNG the terminal paints (pixels) or as block characters for a `Raster` (blocks, `player/cells.mjs`) and turning the pane's input into the game's. The mod controls it over localhost behind a random token. `player/setup.mjs` finds or downloads the browser. |
 

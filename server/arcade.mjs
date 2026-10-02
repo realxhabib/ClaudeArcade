@@ -10,9 +10,10 @@ import { EMPTY_RESET_MS, Lobby, SEATS } from "./lobby.mjs";
 export const DEFAULT_MAX_MATCHES = 25;
 
 export class Arcade {
-  /** @param {{ now?: () => number, maxMatches?: number }} [options] */
+  /** @param {{ now?: () => number, maxMatches?: number, bots?: "fill" | "solo" }} [options] */
   constructor(options = {}) {
     this.now = options.now ?? Date.now;
+    this.bots = options.bots ?? "fill";
     this.maxMatches = Math.max(1, options.maxMatches ?? DEFAULT_MAX_MATCHES);
     /** @type {Lobby[]} */
     this.lobbies = [];
@@ -22,7 +23,7 @@ export class Arcade {
   }
 
   open() {
-    const lobby = new Lobby({ now: this.now, id: this.nextId++, nextSession: () => ++this.sessions });
+    const lobby = new Lobby({ now: this.now, id: this.nextId++, nextSession: () => ++this.sessions, bots: this.bots });
     this.lobbies.push(lobby);
     return lobby;
   }

@@ -453,7 +453,8 @@ export class Engine {
     for (const s of g.soldiers) {
       const r = this.rigs.get(s.id);
       if (!r) continue;
-      const firstPerson = s.isMe && !this.spectating() && (s.alive || !this.deathCam);
+      // An empty seat's soldier isn't in the match: never drawn.
+      const firstPerson = s.vacant || (s.isMe && !this.spectating() && (s.alive || !this.deathCam));
       if (r.kind === "skinned") r.rig.update(s, now, frozen ? 0 : dt, firstPerson, g.weapon(s).id, s.local ? g.isReloading(s, now) : !!(s.view.flags & F_RELOAD));
       else r.rig.update(s, now, dt, firstPerson);
     }
@@ -996,7 +997,7 @@ export class Engine {
   /** Spectators: cycle who the camera follows. */
   watchNext(): void {
     const list = this.game.soldiers.filter((s) => s.alive);
-    const all = list.length ? list : this.game.soldiers;
+    const all = list.length ? list : this.game.soldiers.filter((s) => !s.vacant);
     const i = all.findIndex((s) => s.id === this.watch);
     this.watch = all[(i + 1) % all.length]?.id ?? null;
     this.freeCam = false;

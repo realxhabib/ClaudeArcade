@@ -86,3 +86,35 @@ describe("Claude Arcade status line", () => {
     expect(hud.weapon).toBeTruthy();
   });
 });
+
+describe("Claude Arcade empty seats", () => {
+  const vacant = (i: number): SeatInfo => ({ ...seat(i), name: "", handle: "", vacant: true });
+
+  it("alone with one bot: the other seats stay out of the match, and a newcomer steps in as the bot leaves", () => {
+    const seats = [seat(0, "Ada"), ...[1, 2, 3, 4, 5, 6].map(vacant), seat(7)];
+    const game = arcadeGame(seats, "seat-0");
+    const at = (i: number) => game.soldiers.find((s) => s.seat === i)!;
+    for (let t = 0; t < 30; t++) game.update(1 / 30, performance.now() + 1000 + t * 33, null, null);
+    // Only you and the bot are in the match.
+    expect(game.hud().scores.map((r) => r.seat)).toEqual([0, 7]);
+    expect(at(3).alive).toBe(false);
+    expect(game.targetable(at(3))).toBe(false);
+    expect(at(7).brain).not.toBeNull();
+
+    // Bo takes seat 1: no bots once two people are in.
+    game.setSeats([seat(0, "Ada"), seat(1, "Bo"), ...[2, 3, 4, 5, 6, 7].map(vacant)]);
+    expect(at(1).vacant).toBe(false);
+    expect(at(1).isBot).toBe(false);
+    expect(at(7).vacant).toBe(true);
+    expect(at(7).alive).toBe(false);
+    expect(at(7).brain).toBeNull();
+    expect(game.hud().scores.map((r) => r.seat)).toEqual([0, 1]);
+
+    // Bo leaves: the bot is back, spawned by whoever drives it (here, us).
+    game.setSeats(seats);
+    const now = performance.now() + 5000;
+    for (let t = 0; t < 30; t++) game.update(1 / 30, now + t * 33, null, null);
+    expect(at(1).vacant).toBe(true);
+    expect(at(7).alive).toBe(true);
+  });
+});

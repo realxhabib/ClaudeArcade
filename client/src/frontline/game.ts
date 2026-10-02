@@ -122,6 +122,8 @@ export interface SeatInfo {
   handle: string;
   isBot: boolean;
   avatarUrl: string | null;
+  /** Claude Arcade: nobody holds the seat, not even a bot (its soldier stays out of the match). */
+  vacant?: boolean;
 }
 
 export interface Intent {
@@ -160,6 +162,8 @@ export interface Soldier {
   sprinting: boolean;
   sprintOutAt: number;
   ads: number;
+  /** An empty seat (Claude Arcade): no soldier in the match, not even a bot, until someone takes it. */
+  vacant: boolean;
   alive: boolean;
   hp: number;
   life: number;
@@ -390,7 +394,7 @@ export class Game {
         loadout = { primary: p.isBot ? botWeapon(r) : "ar", perk: "quick_hands" };
       }
       const s = this.makeSoldier(p, isMe, loadout);
-      if (p.isBot) {
+      if (p.isBot && !p.vacant) {
         const r = o.seedRandom(`bot:${p.seat}`);
         s.brain = new BotBrain(botSkill(botLevel(p.seat, r, o.practice)), r);
       }
@@ -411,7 +415,7 @@ export class Game {
     }
     this.assignOwnership();
     for (const s of this.soldiers) {
-      if (!s.local) continue;
+      if (!s.local || s.vacant) continue;
       // Rejoining: lives continue after the deaths already on record.
       s.life = this.deathsOf(s.seat);
       this.spawn(s, !fromState || (fromState.k.length === 0 && Date.now() - fromState.t0 < 10_000));
@@ -439,6 +443,7 @@ export class Game {
       sprinting: false,
       sprintOutAt: 0,
       ads: 0,
+      vacant: !!p.vacant,
       alive: false,
       hp: MAX_HP,
       life: 0,
@@ -549,13 +554,25 @@ export class Game {
     for (const p of seats) {
       const s = this.byId.get(p.id);
       if (!s || s.isMe) continue;
-      if (s.isBot === p.isBot && s.handle === p.handle) continue;
+      const vacant = !!p.vacant;
+      if (s.isBot === p.isBot && s.handle === p.handle && s.vacant === vacant) continue;
       changed = true;
+      if (vacant !== s.vacant) {
+        s.vacant = vacant;
+        // Out of the match, or back in it: a bot is spawned by whoever drives it (soon after this),
+        // a person's soldier appears with their packets. Lives carry on after the ones on record.
+        s.alive = false;
+        s.hasNet = false;
+        s.buf = new SnapshotBuffer();
+        s.life = Math.max(s.life, this.deathsOf(s.seat));
+        s.diedAt = 0;
+        s.respawnAt = vacant ? 0 : performance.now() + 400;
+      }
       s.isBot = p.isBot;
       s.handle = p.handle;
       s.name = p.isBot ? p.name : `@${p.handle}`;
       s.avatarUrl = p.avatarUrl;
-      if (p.isBot) {
+      if (p.isBot && !vacant) {
         const r = this.seedRandom(`bot:${p.seat}:${s.life}`);
         s.brain = new BotBrain(botSkill(botLevel(p.seat, r, this.practice)), r);
       } else {
@@ -700,11 +717,11 @@ export class Game {
 
   update(dt: number, now: number, myIntent: Intent | null, look: { yaw: number; pitch: number } | null): void {
     // Remote soldiers first (hit tests use where we draw them).
-    for (const s of this.soldiers) if (!s.local) this.updateRemote(s, now, dt);
+    for (const s of this.soldiers) if (!s.local && !s.vacant) this.updateRemote(s, now, dt);
 
     if (this.phase === "live") {
       for (const s of this.soldiers) {
-        if (!s.local) continue;
+        if (!s.local || s.vacant) continue;
         if (!s.alive) {
           if (now >= s.respawnAt && s.respawnAt > 0) this.spawn(s, false);
           continue;
@@ -1022,6 +1039,7 @@ export class Game {
 
   /** Can bullets hit this soldier right now (as we see it)? */
   targetable(o: Soldier): boolean {
+    if (o.vacant) return false;
     if (o.local) return o.alive;
     return o.hasNet && !(o.view.flags & F_DEAD) && o.deadLife !== o.view.life && o.alive;
   }
@@ -1373,7 +1391,7 @@ export class Game {
     const fresh = this.out.hasNewerThan(this.lastSentEventId);
     this.lastSendAt = now;
     this.lastSentEventId = this.out.lastId;
-    const p = this.soldiers.filter((s) => s.local).map((s) => packSoldier(this.stateOf(s)));
+    const p = this.soldiers.filter((s) => s.local && !s.vacant).map((s) => packSoldier(this.stateOf(s)));
     const packet: Packet = { t: Math.round(now), p };
     if (this.pendingShots.length) {
       packet.f = this.pendingShots.map(({ at, row }) => [row[0], Math.max(0, Math.round(now - at)), row[2], row[3], row[4], row[5]] as ShotRow);
@@ -1720,7 +1738,7 @@ export class Game {
       limit: this.doc.lim,
       teams: this.teams,
       endless: this.endless,
-      scores: this.soldiers.map((s) => ({ seat: s.seat, id: s.id, name: s.name, avatarUrl: s.avatarUrl, handle: s.handle, isBot: s.isBot, isMe: s.isMe, team: s.team, kills: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.kills ?? 0) : (t.kills.get(s.seat) ?? 0), deaths: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.deaths ?? 0) : (t.deaths.get(s.seat) ?? 0), alive: s.alive, online: s.isBot || s.isMe || !this.online || this.online.has(s.id), link: s.isBot || s.isMe ? null : (this.transport.link?.(s.id) ?? null) })),
+      scores: this.soldiers.filter((s) => !s.vacant).map((s) => ({ seat: s.seat, id: s.id, name: s.name, avatarUrl: s.avatarUrl, handle: s.handle, isBot: s.isBot, isMe: s.isMe, team: s.team, kills: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.kills ?? 0) : (t.kills.get(s.seat) ?? 0), deaths: this.arcadeScores ? (this.arcadeScores.get(s.seat)?.deaths ?? 0) : (t.deaths.get(s.seat) ?? 0), alive: s.alive, online: s.isBot || s.isMe || !this.online || this.online.has(s.id), link: s.isBot || s.isMe ? null : (this.transport.link?.(s.id) ?? null) })),
       teamScores: t.team,
       me: me
         ? {

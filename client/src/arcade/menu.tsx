@@ -17,6 +17,8 @@ interface GameCard {
   blurb: string;
   from: string;
   to: string;
+  /** What you'll find with nobody else in. */
+  empty: string;
 }
 
 export const GAMES: readonly GameCard[] = [
@@ -25,9 +27,10 @@ export const GAMES: readonly GameCard[] = [
     key: "1",
     name: "Frontline",
     kind: "First-person shooter",
-    blurb: "Eight-player free for all that never ends. Drop in, rack up kills.",
+    blurb: "Up to eight players, a free for all that never ends. Drop in, rack up kills.",
     from: "#f2b544",
     to: "#e2553a",
+    empty: "Nobody else in yet: a bot keeps you company",
   },
   {
     id: "rally",
@@ -37,6 +40,7 @@ export const GAMES: readonly GameCard[] = [
     blurb: "Two-lap races, items and drifts. A new race every few minutes.",
     from: "#ff5ad1",
     to: "#ffd166",
+    empty: "Nobody else in yet: CPU racers fill the grid",
   },
 ];
 
@@ -137,7 +141,7 @@ export function GameMenu({ onPick }: { onPick: (game: GameId) => void }) {
               <span className="text-[clamp(10px,1.5vw,13px)] font-bold uppercase tracking-wider text-white/70">{g.kind}</span>
               <span className="text-[clamp(11px,1.6vw,15px)] leading-snug text-white/80">{g.blurb}</span>
               <span className="mt-auto text-[clamp(10px,1.4vw,13px)] font-semibold text-white/60">
-                {playing === undefined ? " " : playing === 0 ? "Nobody playing yet: bots fill the seats" : `${playing} playing now`}
+                {playing === undefined ? " " : playing === 0 ? g.empty : `${playing} playing now`}
               </span>
             </motion.button>
           );

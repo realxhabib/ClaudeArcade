@@ -37,7 +37,10 @@ const TYPES = {
 /** Each game has its own matches; a client names its game (Frontline when it doesn't say). */
 const GAMES = ["frontline", "rally"];
 const maxMatches = Number(process.env.MAX_MATCHES ?? DEFAULT_MAX_MATCHES);
-const arcades = Object.fromEntries(GAMES.map((game) => [game, new Arcade({ maxMatches })]));
+// Frontline is people against people: one bot keeps someone alone company and leaves when a second
+// person arrives. Nova Rally fills its grid with CPU racers.
+const BOTS = { frontline: "solo", rally: "fill" };
+const arcades = Object.fromEntries(GAMES.map((game) => [game, new Arcade({ maxMatches, bots: BOTS[game] })]));
 setInterval(() => Object.values(arcades).forEach((a) => a.tick()), 1000);
 
 /** /health: everyone online across the games (`players`, `online`), and each game's matches. */

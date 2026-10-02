@@ -73,3 +73,27 @@ test("messages stay within their match", () => {
   assert.ok(b.inbox.some((m) => m.t === "room"));
   assert.ok(!c.inbox.some((m) => m.t === "room"));
 });
+
+test("Frontline-style matches: a bot only keeps someone alone company", () => {
+  let t = 1_000_000;
+  const arcade = new Arcade({ now: () => t, bots: "solo" });
+  const people = [];
+  const join = (name) => {
+    const c = { seat: null, inbox: [], send: (m) => c.inbox.push(m) };
+    c.welcome = arcade.join(c, name);
+    people.push(c);
+    return c;
+  };
+  const roster = () => arcade.lobbies[0].players().map((p) => (p.isBot ? `bot@${p.seat}` : `${p.name}@${p.seat}`));
+  const a = join("Ada");
+  assert.deepEqual(roster(), ["Ada@0", "bot@7"], "alone: you and one bot");
+  assert.equal(a.welcome.players.length, 2);
+  join("Bo");
+  assert.deepEqual(roster(), ["Ada@0", "Bo@1"], "a second person: no bots, the other seats empty");
+  assert.deepEqual(a.inbox.filter((m) => m.t === "players").at(-1).players.map((p) => p.name), ["Ada", "Bo"], "and everyone hears it");
+  for (let i = 2; i < 8; i++) join(`P${i}`);
+  assert.equal(roster().length, 8);
+  assert.equal(arcade.lobbies.length, 1, "eight people fill the match");
+  for (const c of people.slice(1)) arcade.leave(c);
+  assert.deepEqual(roster(), ["Ada@0", "bot@7"], "alone again: the bot is back");
+});

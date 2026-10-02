@@ -40,8 +40,17 @@ export function isArcade(xapps: XAppsClient): boolean {
 }
 
 
-function seatsOf(players: PlayerInfo[]): SeatInfo[] {
-  return players.map((p) => ({ id: p.id, seat: p.seat, name: p.name, handle: p.handle, isBot: p.isBot, avatarUrl: p.avatarUrl }));
+/** Claude Arcade's matches have this many seats; the ones nobody holds (no bot either) are empty. */
+const ARCADE_SEATS = 8;
+
+function seatsOf(players: PlayerInfo[], arcade = false): SeatInfo[] {
+  const seats: SeatInfo[] = players.map((p) => ({ id: p.id, seat: p.seat, name: p.name, handle: p.handle, isBot: p.isBot, avatarUrl: p.avatarUrl }));
+  if (!arcade) return seats;
+  // Every seat gets a soldier, so someone taking an empty one later steps into a soldier that exists.
+  for (let seat = 0; seat < ARCADE_SEATS; seat++) {
+    if (!seats.some((s) => s.seat === seat)) seats.push({ id: `seat-${seat}`, seat, name: "", handle: "", isBot: true, avatarUrl: null, vacant: true });
+  }
+  return seats.sort((a, b) => a.seat - b.seat);
 }
 
 /** Dev only: shorter matches / lower limits for testing (`localStorage["frontline:debug"] = '{"lim":3,"dur":60000}'`). */
@@ -85,7 +94,7 @@ function createGame(xapps: XAppsClient, players: PlayerInfo[], me: PlayerInfo, s
   const simAll = spectator && humans.length === 0;
   return new Game({
     map: MAPS[DEFAULT_MAP],
-    seats: seatsOf(players),
+    seats: seatsOf(players, isArcade(xapps)),
     meId: spectator ? null : me.id,
     spectator,
     simAll,
@@ -268,7 +277,7 @@ export function MatchView({ settings, onSettings }: { settings: Settings; onSett
   useEffect(() => game.setOnline(online), [game, online]);
   // Claude Arcade: people drop in on bots' seats and hand them back as they come and go.
   useEffect(() => {
-    if (isArcade(xapps)) game.setSeats(seatsOf(players));
+    if (isArcade(xapps)) game.setSeats(seatsOf(players, true));
   }, [game, players, xapps]);
   // The arcade server keeps the score (per seat, since its current occupant arrived).
   useRoomEvent<{ seat: number; kills: number; deaths: number }[]>("arcade.scores", (rows) => {
