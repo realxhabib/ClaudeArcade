@@ -96,7 +96,7 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.4.9 is on')
+    expect(reply).toContain('Claude Arcade 0.4.10 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()
@@ -113,7 +113,42 @@ describe('claudearcade', () => {
   test('/arcade status says what it is doing', async ($, on) => {
     mock.store(on)
     const text = JSON.stringify(await $.command.run({ command: 'arcade', args: 'status' }))
-    expect(text).toContain('Claude Arcade 0.4.9')
+    expect(text).toContain('Claude Arcade 0.4.10')
     expect(text).toContain('Last problem: none')
+  })
+
+  test('while Claude works, it drops into the game window after two seconds', async ($, on) => {
+    mock.store(on, { isOn: true, game: 'frontline' })
+    const clock = mock.clock(on)
+    on('session.start', () => ({}) as never)
+    on('turn.start', () => ({ turnId: 't1' }) as never)
+    on('session.surfaces', () => ({ value: ['terminal'] }))
+    on('process.run', (_$, e) => {
+      const argv = (e as { argv: string[] }).argv.join(' ')
+      const stdout = argv.includes('--version') ? 'v22.0.0\n' : argv.includes('setup.mjs') ? '{"platform":"win64","browser":"C:/Edge/msedge.exe"}\n' : 'win32\n'
+      return { value: { exitCode: 0, stdout, stderr: '' } }
+    })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    const spawned: string[][] = []
+    on('process.spawn', async function* (_$, e) {
+      spawned.push([...(e as { argv: string[] }).argv])
+      await clock.sleep(60_000)
+      return { exitCode: 0 }
+    } as never)
+    on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{"ok":true,"players":[]}' } }))
+    // A session starting (reads the saved settings), then Claude starting to work.
+    await ($ as unknown as { session: { start: (e: unknown) => Promise<unknown> } }).session.start({ source: 'startup', cwd: '/tmp' }).catch(() => {})
+    const turn = ($ as unknown as { turn: { start?: (e: unknown) => Promise<unknown> } }).turn
+    await turn.start?.({ text: 'do a long thing', turnId: 't1' })
+    await clock.settle()
+    // Not yet: it waits two seconds in case Claude is quick.
+    expect(spawned.length).toBe(0)
+    await clock.advance(3000)
+    const status = JSON.stringify(await $.command.run({ command: 'arcade', args: 'status' }))
+    expect(status).toContain('dropping in (game window)')
+    // The game program started, as a window that shows itself, on the arcade server.
+    expect(spawned.length).toBe(1)
+    expect(spawned[0]).toContain('--show')
+    expect(spawned[0]!.join(' ')).toContain('https://174-138-34-59.sslip.io/?name=')
   })
 })

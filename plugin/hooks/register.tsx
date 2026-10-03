@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.9'
+const VERSION = '0.4.10'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -116,6 +116,15 @@ let drawn: { columns: number; rows: number } | null = null
 let windowBounds: string | null = null
 /** The last thing that went wrong, for /arcade status. */
 let lastProblem: string | null = null
+/** What happened lately (turns, drop-ins, hand-backs), for /arcade status. */
+const recent: string[] = []
+
+function trace(event: string) {
+  const at = new Date()
+  const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}:${String(at.getSeconds()).padStart(2, '0')}`
+  recent.push(`${time} ${event}`)
+  if (recent.length > 12) recent.shift()
+}
 /** The block width the pane has room for, last told to the player. */
 let blockColumns = 160
 let imageDenies = 0
@@ -136,6 +145,7 @@ function cancelTimer() {
 function armDropIn($: Engine) {
   if (!isOn || !isTurnRunning || isDismissed || phase !== 'idle') return
   phase = 'waiting'
+  trace('dropping in shortly')
   timer = $.clock.after(DROP_IN_DELAY_MS, () => void dropIn($))
 }
 
@@ -156,19 +166,36 @@ async function resolveView($: Engine): Promise<View | null> {
 async function dropIn($: Engine) {
   if (phase !== 'waiting') return
   timer = null
-  const next = await resolveView($)
-  if (!next || phase !== 'waiting') {
+  try {
+    const next = await resolveView($)
+    if (!next || phase !== 'waiting') {
+      trace(next ? 'drop-in called off (Claude moved on)' : 'drop-in skipped: no terminal to show the game in')
+      if (phase === 'waiting') phase = 'idle'
+      return
+    }
+    adoptView(next)
+    const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
+    if (!opened.isPlaced) {
+      await $.ui.close({ id: PANE })
+      // The game window doesn't need the pane (it's only the scoreboard); the views in the pane do.
+      if (view !== 'window') {
+        trace('drop-in skipped: the pane could not be placed')
+        phase = 'idle'
+        return
+      }
+      trace('pane could not be placed; opening the game window anyway')
+    }
+    if (phase !== 'waiting') {
+      trace('drop-in called off (Claude moved on)')
+      return
+    }
+    trace(`dropping in (${view === 'window' ? 'game window' : view})`)
+    await startPlaying($)
+  } catch (error) {
+    lastProblem = `drop-in failed: ${String(error instanceof Error ? error.message : error)}`
+    trace(lastProblem)
     if (phase === 'waiting') phase = 'idle'
-    return
   }
-  adoptView(next)
-  const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true })
-  if (!opened.isPlaced) {
-    await $.ui.close({ id: PANE })
-    phase = 'idle'
-    return
-  }
-  await startPlaying($)
 }
 
 /** Takes `next` as the view; a running player of the other kind (window or headless) goes. */
@@ -210,6 +237,7 @@ function startCountdown($: Engine) {
 async function handBack($: Engine) {
   cancelTimer()
   if (phase === 'idle') return
+  trace('handing back to Claude')
   phase = 'idle'
   await $.ui.close({ id: PANE })
   await putAway($)
@@ -301,14 +329,21 @@ async function runPlayer($: Engine) {
     $.ui.invalidate('ui.render')
     return
   }
+  trace('checking the arcade server')
   const problem = await checkServer($)
   if (problem) {
+    lastProblem = problem
+    trace(`server problem: ${problem}`)
     status = problem
     $.ui.invalidate('ui.render')
     return
   }
   const chrome = await setup($)
   if (!chrome || phase === 'idle') {
+    if (!chrome) {
+      lastProblem = status ?? 'no browser to run the game in'
+      trace(`couldn't start: ${lastProblem}`)
+    } else trace('launch called off: Claude already finished')
     $.ui.invalidate('ui.render')
     return
   }
@@ -323,6 +358,7 @@ async function runPlayer($: Engine) {
   status = windowed ? `Opening the game window as ${name}…` : `Joining the arcade as ${name}…`
   $.ui.invalidate('ui.render')
   playerWindowed = windowed
+  trace('starting the game program')
   const stream = $.process.spawn({
     argv: [
       'node', `${$.plugin.root}/player/player.mjs`, '--chrome', chrome, '--url', url,
@@ -337,7 +373,12 @@ async function runPlayer($: Engine) {
   let pending = ''
   try {
     for await (const { stream: pipe, text } of stream) {
-      if (pipe !== 'stdout') continue
+      if (pipe !== 'stdout') {
+        // A crash before it could say anything shows up here.
+        const line = text.trim().split('\n').filter(Boolean).pop()
+        if (line) lastProblem = `game program: ${line.slice(0, 300)}`
+        continue
+      }
       const lines = (pending + text).split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
@@ -351,8 +392,10 @@ async function runPlayer($: Engine) {
       }
     }
   } catch (error) {
-    $.ui.log(`claudearcade player did not start: ${String(error)}`, { to: 'debug' })
+    lastProblem = `the game program did not start: ${String(error instanceof Error ? error.message : error)}`
+    $.ui.log(`claudearcade: ${lastProblem}`, { to: 'debug' })
   }
+  trace('game program stopped')
   if (player === stream) {
     player = null
     clearFrames()
@@ -403,6 +446,7 @@ function onPlayerMessage($: Engine, msg: PlayerMessage) {
     warmTimer?.cancel()
     warmTimer = null
   } else if ((msg as { ready?: boolean }).ready && playerWindowed) {
+    trace('game window up')
     status = null
     $.ui.invalidate('ui.render')
     // It shows itself (--show); if the turn ended while it loaded, it stays out of sight.
@@ -571,6 +615,8 @@ export const register: Register = on => {
         `Right now: ${phase === 'idle' ? 'waiting for Claude to work' : phase === 'waiting' ? 'about to drop in' : phase === 'countdown' ? 'handing back' : 'playing'}${isTurnRunning ? ' (Claude is working)' : ''}${isDismissed ? ' (closed for this turn)' : ''}`,
         `Game program: ${player ? (inputUrl ? 'running' : 'starting') : 'not running'}${status ? ` · ${status}` : ''}`,
         `Last problem: ${lastProblem ?? 'none'}`,
+        `Recently:${recent.length ? '' : ' nothing yet this session'}`,
+        ...recent.map(line => `  ${line}`),
       ]
       return { text: lines.join('\n') }
     }
@@ -611,6 +657,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     isTurnRunning = true
     isDismissed = false
+    trace(`Claude started working${isOn ? '' : ' (arcade off)'}`)
     if (phase === 'countdown') {
       cancelTimer()
       phase = 'playing'
@@ -624,6 +671,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId) return next(e)
     isTurnRunning = false
+    trace(`Claude finished (${String((e as { reason?: string }).reason ?? 'done')})`)
     if (phase === 'waiting') {
       cancelTimer()
       phase = 'idle'
@@ -639,6 +687,7 @@ export const register: Register = on => {
   // accept-edits mode most asks are settled without a dialog, and handing back on each bounced you
   // out of the game and back in on every tool call.)
   on('classic.PermissionRequest', async ($, e, next) => {
+    trace(`permission dialog (${e.tool_name})`)
     if (phase === 'waiting') {
       cancelTimer()
       phase = 'idle'
