@@ -45,11 +45,11 @@ No Claude Code handy? Play in your browser at **https://174-138-34-59.sslip.io**
 
 ## Where the game shows
 
-- **A game window** (Windows, and the Claude desktop app): the game pops up in its own Chrome or Edge window when you drop in, at full quality with real mouse aim. It opens on the right half of the screen so the terminal stays in view; move or resize it and it opens there from then on. It minimizes when Claude is done (a banner counts you down first) and comes back on the next turn. The pane beside the transcript keeps your health, ammo and score.
-- **Pixels**, in the pane itself, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code (macOS and Linux).
+- **A game window** (Windows, Mac, and the Claude desktop app): the game pops up in its own Chrome or Edge window when you drop in, at full quality with real mouse aim. It opens on the right half of the screen so the terminal stays in view; move or resize it and it opens there from then on. It minimizes when Claude is done (a banner counts you down first) and comes back on the next turn. The pane beside the transcript keeps your health, ammo and score.
+- **Pixels**, in the pane itself, in [Ghostty](https://ghostty.org) and [kitty](https://sw.kovidgoyal.net/kitty/), the terminals that can draw images in Claude Code (Linux's default; on a Mac, `/arcade view pixels`).
 - **Blocks**, in the pane, the picture drawn with `▀` characters, each one two coloured pixels, in any terminal with true colour. Coarse: shrink the terminal's font (Ctrl or Cmd and minus) for a sharper picture. Health, ammo and the score are written under it.
 
-It picks for you: a window on Windows or without a terminal, pixels elsewhere, switching to blocks by itself if your terminal turns out not to draw images. To choose, run `/arcade view window`, `/arcade view pixels` or `/arcade view blocks`, and `/arcade view auto` to go back to choosing automatically.
+It picks for you: a window on Windows and Mac (and without a terminal), pixels on Linux, switching to blocks by itself if your terminal turns out not to draw images. With no Chrome or Edge installed there's no window to open, so it plays in the terminal instead. To choose, run `/arcade view window`, `/arcade view pixels` or `/arcade view blocks`, and `/arcade view auto` to go back to choosing automatically.
 
 ## Controls
 

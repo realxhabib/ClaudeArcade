@@ -54,8 +54,8 @@ describe('claudearcade', () => {
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view' }))).toContain('Showing the game as blocks')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view pixels' }))).toContain('as pixels')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view window' }))).toContain('as window')
-    // Auto in a Mac terminal: back to real images in the pane.
-    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view auto' }))).toContain('as pixels (auto)')
+    // Auto on a Mac: the game window too, as on Windows.
+    expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'view auto' }))).toContain('as window (auto)')
   })
 
   test('on Windows, auto plays in a game window, and the pane keeps the score', async ($, on) => {
@@ -96,7 +96,7 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.4.10 is on')
+    expect(reply).toContain('Claude Arcade 0.4.11 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()
@@ -113,11 +113,12 @@ describe('claudearcade', () => {
   test('/arcade status says what it is doing', async ($, on) => {
     mock.store(on)
     const text = JSON.stringify(await $.command.run({ command: 'arcade', args: 'status' }))
-    expect(text).toContain('Claude Arcade 0.4.10')
+    expect(text).toContain('Claude Arcade 0.4.11')
     expect(text).toContain('Last problem: none')
   })
 
-  test('while Claude works, it drops into the game window after two seconds', async ($, on) => {
+  for (const os of ['win32', 'darwin'] as const) {
+  test(`while Claude works, it drops into the game window after two seconds (${os})`, async ($, on) => {
     mock.store(on, { isOn: true, game: 'frontline' })
     const clock = mock.clock(on)
     on('session.start', () => ({}) as never)
@@ -125,7 +126,8 @@ describe('claudearcade', () => {
     on('session.surfaces', () => ({ value: ['terminal'] }))
     on('process.run', (_$, e) => {
       const argv = (e as { argv: string[] }).argv.join(' ')
-      const stdout = argv.includes('--version') ? 'v22.0.0\n' : argv.includes('setup.mjs') ? '{"platform":"win64","browser":"C:/Edge/msedge.exe"}\n' : 'win32\n'
+      const browser = os === 'win32' ? '{"platform":"win64","browser":"C:/Edge/msedge.exe"}' : '{"platform":"mac-arm64","browser":"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"}'
+      const stdout = argv.includes('--version') ? 'v22.0.0\n' : argv.includes('setup.mjs') ? `${browser}\n` : `${os}\n`
       return { value: { exitCode: 0, stdout, stderr: '' } }
     })
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -151,4 +153,5 @@ describe('claudearcade', () => {
     expect(spawned[0]).toContain('--show')
     expect(spawned[0]!.join(' ')).toContain('https://174-138-34-59.sslip.io/?name=')
   })
+  }
 })

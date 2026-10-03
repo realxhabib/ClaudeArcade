@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.10'
+const VERSION = '0.4.11'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -89,6 +89,8 @@ let game: Game | null = null
 /** What the person picked with `/arcade view`; `auto` is a window on Windows or without a terminal, else pixels until refused. */
 let viewChoice: 'auto' | View = 'auto'
 let view: View = 'pixels'
+/** Only Chrome's headless build is available (no Chrome or Edge installed), so no game window. */
+let noWindowBrowser = false
 /** Node's `process.platform` where the game runs, once asked. */
 let platform: string | null = null
 /** Whether the running player is a game window (switching to or from one restarts it). */
@@ -157,9 +159,10 @@ async function resolveView($: Engine): Promise<View | null> {
     const run = await $.process.run(['node', '-p', 'process.platform']).catch(() => null)
     platform = run?.exitCode === 0 ? run.stdout.trim() : ''
   }
-  // Windows terminals can't draw images in Claude Code (blocks are too coarse to play well), and
-  // the desktop app has no terminal at all: a real game window plays best.
-  if (platform === 'win32' || !hasTerminal) return 'window'
+  // Windows and Mac get a real game window beside the terminal (Windows terminals can't draw images
+  // in Claude Code, most Mac ones can't either, and blocks are too coarse to play well); so does the
+  // desktop app, which has no terminal at all. Linux plays in the pane.
+  if (platform === 'win32' || platform === 'darwin' || !hasTerminal) return noWindowBrowser && hasTerminal ? (view === 'blocks' ? 'blocks' : 'pixels') : 'window'
   return view === 'blocks' ? 'blocks' : 'pixels'
 }
 
@@ -347,12 +350,21 @@ async function runPlayer($: Engine) {
     $.ui.invalidate('ui.render')
     return
   }
-  const windowed = view === 'window'
-  if (windowed && /chrome-headless-shell/.test(chrome)) {
-    status = 'The game window needs Google Chrome or Microsoft Edge installed. /arcade view blocks plays in the terminal instead.'
-    $.ui.invalidate('ui.render')
-    return
+  if (view === 'window' && /chrome-headless-shell/.test(chrome)) {
+    // Only Chrome's headless build here (no Chrome or Edge installed): it can't open a window.
+    noWindowBrowser = true
+    if (viewChoice === 'auto' && (await $.session.surfaces()).includes('terminal')) {
+      trace('no Chrome or Edge for a window: playing in the terminal pane')
+      adoptView('pixels')
+      await $.ui.open({ id: PANE, title: TITLE, focus: true })
+    } else {
+      status = 'The game window needs Google Chrome or Microsoft Edge installed. /arcade view blocks plays in the terminal instead.'
+      lastProblem = status
+      $.ui.invalidate('ui.render')
+      return
+    }
   }
+  const windowed = view === 'window'
   // `pane`: the hidden browser painting the pane takes mouse look from the pane, not pointer lock.
   const url = `${server.replace(/\/$/, '')}/?name=${encodeURIComponent(name)}${game ? `&game=${game}` : ''}&managed=1${windowed ? '' : '&pane=1'}`
   status = windowed ? `Opening the game window as ${name}…` : `Joining the arcade as ${name}…`
