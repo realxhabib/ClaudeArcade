@@ -1028,7 +1028,7 @@ export class Engine {
     const from = { x: cam.position.x, y: cam.position.y, z: cam.position.z };
     for (const s of g.soldiers) {
       let tag = this.npcTags.get(s.id);
-      const show = s.isBot && !s.vacant && s !== me && g.targetable(s);
+      const show = s.isBot && !s.vacant && s !== me && g.targetable(s) && !this.paused;
       if (!show) {
         if (tag) tag.style.opacity = "0";
         continue;

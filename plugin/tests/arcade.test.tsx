@@ -96,7 +96,7 @@ describe('claudearcade', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.command.run({ command: 'arcade', args: 'server https://example.com' })
     const reply = JSON.stringify(await $.command.run({ command: 'arcade', args: '' }))
-    expect(reply).toContain('Claude Arcade 0.4.8 is on')
+    expect(reply).toContain('Claude Arcade 0.4.9 is on')
     await new Promise(r => setTimeout(r, 50))
     const ui = await $.ui.mount({ plugin: 'claudearcade', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /isn't a Claude Arcade server/ })).toBeDefined()
@@ -108,5 +108,12 @@ describe('claudearcade', () => {
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game rally' }))).toContain('plays Nova Rally now')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game' }))).toContain('game menu next time')
     expect(JSON.stringify(await $.command.run({ command: 'arcade', args: 'game tetris' }))).toContain('/arcade game frontline')
+  })
+
+  test('/arcade status says what it is doing', async ($, on) => {
+    mock.store(on)
+    const text = JSON.stringify(await $.command.run({ command: 'arcade', args: 'status' }))
+    expect(text).toContain('Claude Arcade 0.4.9')
+    expect(text).toContain('Last problem: none')
   })
 })

@@ -20,7 +20,7 @@ type Engine = EngineInterface
 const PANE = 'claudearcade'
 const TITLE = 'Claude Arcade'
 /** Kept in step with .claude-plugin/plugin.json; `/arcade` says it, so an update is easy to check. */
-const VERSION = '0.4.8'
+const VERSION = '0.4.9'
 /**
  * The arcade server everyone waiting on Claude joins: set it here once yours is deployed (see the
  * README's Hosting section). `/arcade server <url>` overrides it per person.
@@ -114,6 +114,8 @@ let inputUrl: string | null = null
 let drawn: { columns: number; rows: number } | null = null
 /** Where the game window was last left ("left,top,width,height"), so it opens there next time. */
 let windowBounds: string | null = null
+/** The last thing that went wrong, for /arcade status. */
+let lastProblem: string | null = null
 /** The block width the pane has room for, last told to the player. */
 let blockColumns = 160
 let imageDenies = 0
@@ -327,6 +329,8 @@ async function runPlayer($: Engine) {
       '--view', windowed ? 'window' : view === 'blocks' ? 'cells' : 'pixels', '--columns', String(blockColumns),
       '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', view === 'blocks' ? '20' : '30',
       ...(windowed && windowBounds ? ['--bounds', windowBounds] : []),
+      // The window shows itself once loaded (no round trip through us), unless told otherwise by then.
+      ...(windowed ? ['--show'] : []),
     ],
   }) as unknown as Stream
   player = stream
@@ -401,8 +405,8 @@ function onPlayerMessage($: Engine, msg: PlayerMessage) {
   } else if ((msg as { ready?: boolean }).ready && playerWindowed) {
     status = null
     $.ui.invalidate('ui.render')
-    // The window loads out of sight: show it if Claude is still working, else it waits for the next turn.
-    void postToPlayer($, 'window', { state: isShowing() ? 'normal' : 'minimized' })
+    // It shows itself (--show); if the turn ended while it loaded, it stays out of sight.
+    if (!isShowing()) void postToPlayer($, 'window', { state: 'minimized' })
   } else if (msg.frame && typeof msg.gen === 'number') {
     if (view !== 'pixels') return
     const first = !frame
@@ -438,6 +442,7 @@ function onPlayerMessage($: Engine, msg: PlayerMessage) {
     // Blocks and the window show the numbers; every view names the game and its controls.
     if ((view !== 'pixels' || switched) && isShowing()) $.ui.invalidate('ui.render')
   } else if (msg.error) {
+    lastProblem = `game: ${msg.error}`
     $.ui.log(`claudearcade player: ${msg.error}`, { to: 'debug' })
   }
 }
@@ -473,8 +478,17 @@ async function sendInput($: Engine, input: Input) {
 }
 
 async function postToPlayer($: Engine, route: 'input' | 'view' | 'window' | 'notice', body: unknown) {
-  if (!inputUrl || !player) return
-  await $.http.fetch(`${inputUrl}/${route}`, { method: 'POST', body: JSON.stringify(body) }).catch(() => {})
+  if (!inputUrl || !player) {
+    if (route !== 'input') lastProblem = `couldn't send "${route}": the game isn't connected yet`
+    return
+  }
+  try {
+    const res = await $.http.fetch(`${inputUrl}/${route}`, { method: 'POST', body: JSON.stringify(body) })
+    if (!res.ok) lastProblem = `"${route}" to the game answered ${res.status}`
+  } catch (error) {
+    lastProblem = `couldn't reach the game for "${route}": ${String(error instanceof Error ? error.message : error)}`
+    $.ui.log(`claudearcade: ${lastProblem}`, { to: 'debug' })
+  }
 }
 
 /** The block picture that fits the pane: as wide as its body, no taller than leaves two lines of text. */
@@ -526,7 +540,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'arcade',
       description: 'Play Frontline or Nova Rally with everyone waiting on Claude',
-      argumentHint: '[off | game frontline|rally | view window|blocks|pixels|auto | server <url>]',
+      argumentHint: '[off | status | game frontline|rally | view window|blocks|pixels|auto | server <url>]',
     })
     return next(e)
   })
@@ -549,6 +563,16 @@ export const register: Register = on => {
       const next = await resolveView($)
       if (next && next !== view) await setView($, next)
       return { text: `Claude Arcade shows the game as ${arg === 'auto' ? `${next ?? view} (auto)` : arg}.` }
+    }
+    if (verb === 'status') {
+      const lines = [
+        `Claude Arcade ${VERSION}: ${isOn ? 'on' : 'off (/arcade turns it on)'}`,
+        `Game: ${game ? GAME_NAMES[game] : 'the menu'} · shown as ${view === 'window' ? 'a game window' : view} · server ${server || 'not set'}`,
+        `Right now: ${phase === 'idle' ? 'waiting for Claude to work' : phase === 'waiting' ? 'about to drop in' : phase === 'countdown' ? 'handing back' : 'playing'}${isTurnRunning ? ' (Claude is working)' : ''}${isDismissed ? ' (closed for this turn)' : ''}`,
+        `Game program: ${player ? (inputUrl ? 'running' : 'starting') : 'not running'}${status ? ` · ${status}` : ''}`,
+        `Last problem: ${lastProblem ?? 'none'}`,
+      ]
+      return { text: lines.join('\n') }
     }
     if (verb === 'game') {
       if (arg && arg !== 'frontline' && arg !== 'rally') return { text: 'Games: /arcade game frontline, /arcade game rally, or /arcade game for the menu.' }

@@ -3,10 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Frontline · Claude Arcade</title>
+    <title>Claude Arcade</title>
+    <style>
+      /* Shown until the game's code has loaded (the arcade's own loading screens take over from here). */
+      html, body { margin: 0; background: #0b0814; }
+      #boot { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; color: #fff;
+        font: 600 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: radial-gradient(ellipse at top, #2a1a4a, #0b0814 70%); }
+      #boot small { display: block; font-size: 11px; letter-spacing: .35em; text-transform: uppercase; opacity: .6; }
+    </style>
   </head>
   <body class="bg-ink-950">
-    <div id="root"></div>
+    <div id="root"><div id="boot"><div><small>Claude Arcade</small>Loading…</div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

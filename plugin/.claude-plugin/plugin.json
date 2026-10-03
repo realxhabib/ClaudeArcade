@@ -1,7 +1,7 @@
 {
   "name": "claudearcade",
   "displayName": "Claude Arcade",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Play Frontline (shooter) or Nova Rally (kart racing) with everyone waiting on Claude, and get handed back when it's done",
   "homepage": "https://github.com/realxhabib/ClaudeArcade",
   "repository": "https://github.com/realxhabib/ClaudeArcade",

@@ -10,7 +10,7 @@
 //           with the real keyboard and mouse; the pane only shows the score
 //
 //   node player.mjs --chrome <path> --url <game url>
-//                   [--view pixels|cells|window] [--columns 160] [--frames <dir>]
+//                   [--view pixels|cells|window] [--columns 160] [--frames <dir>] [--show]
 //                   [--width 640] [--height 360] [--fps 30] [--sound]
 //
 // stdout, one JSON line each: {"input":"http://127.0.0.1:<port>/<token>"}
@@ -26,7 +26,9 @@
 //     (headless only; a window stays a window).
 //   POST <url>/window { state: "normal" | "minimized" } shows or hides the window. Shown the first
 //     time, it takes --bounds "left,top,width,height" or else the right half of the screen, so the
-//     terminal stays in view; moved or resized, it reports {"bounds":"l,t,w,h"} as it's put away. Minimized, it
+//     terminal stays in view; moved or resized, it reports {"bounds":"l,t,w,h"} as it's put away.
+//     With --show the window shows itself at once (its loading screen first), unless it was told to
+//     stay minimized by then. Minimized, it
 //     also leaves the game (a hidden page stops running, and other players would wait on it if it
 //     ran their bots); shown again, it rejoins where it was (the same game, not the menu).
 //   POST <url>/notice { text } shows a line over the game ("" clears it).
@@ -152,10 +154,13 @@ async function start() {
   void hudLoop();
   // The app window opened on the game already.
   if (WINDOWED) {
-    // Out of sight until the mod shows it (/window normal once the game has loaded, if Claude is
-    // still working by then): no window flashing up for a turn that's already over.
-    const { windowId } = await cdp("Browser.getWindowForTarget", { targetId });
-    await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } }).catch(() => {});
+    // With --show, up at once with the loading screen (a minimized page barely runs, so loading out of
+    // sight only made it slower). Without it, or if the turn already ended, it waits out of sight.
+    if (args.show && !wantHidden) await setWindow("normal").catch((error) => out({ error: `show: ${error.message}` }));
+    else {
+      const { windowId } = await cdp("Browser.getWindowForTarget", { targetId });
+      await cdp("Browser.setWindowBounds", { windowId, bounds: { windowState: "minimized" } }).catch(() => {});
+    }
     // Someone pressing Play now on the away page is back in the game.
     listeners.set("Page.frameNavigated", (params) => {
       if (params?.frame?.parentId || !/^https?:/.test(params?.frame?.url ?? "") || awayFrom === null) return;
@@ -173,6 +178,8 @@ async function start() {
 
 /** Where the window was before it was put away, to rejoin there. */
 let awayFrom = null;
+/** The mod asked for the window minimized (before it had even loaded, maybe): don't show it by itself. */
+let wantHidden = false;
 /** Where the window goes when shown: --bounds, or (null) the right half of the screen, worked out once. */
 let bounds = parseBounds(args.bounds);
 let placed = false;
@@ -382,6 +389,7 @@ const server = createServer((req, res) => {
     } catch {
       // ignore a bad post
     }
+    if (route === "window") wantHidden = msg?.state === "minimized";
     if (route === "window" || route === "notice") {
       (route === "window" ? setWindow(msg?.state) : notice(msg?.text)).then(
         () => res.end("{}"),
