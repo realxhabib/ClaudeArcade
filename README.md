@@ -119,6 +119,18 @@ With a domain (`… | sh -s <domain>`, or `./deploy.sh <host> <domain>`), the ar
 
 `deploy.sh` copies this checkout to the server, installs Node 22, builds the client there (adding swap on small machines), and runs the server as the `claudearcade` systemd service, restarting it if it ever stops. Re-run it to update.
 
+### XApps match rooms
+
+The same server can also carry the live traffic of [XApps](https://github.com/realxhabib/XApps) matches for its fast games (Frontline, Nova Rally, Wedge Wars), which outgrow Supabase Realtime's message quota: a WebSocket at `/room?match=<id>`, one room per match (`server/rooms.mjs`). People sign in with their XApps session and the server asks XApps' Supabase project whether they're in that match (the same check as XApps' own rooms), so it only needs the project's public URL and key. Turn it on with `/etc/claudearcade.env` on the server:
+
+```
+XAPPS_SUPABASE_URL=https://<project>.supabase.co
+XAPPS_SUPABASE_ANON_KEY=<the project's anon / publishable key>
+XAPPS_ORIGINS=https://vibecade.si
+```
+
+then `systemctl restart claudearcade`. `/health` shows the rooms open. Without the file, `/room` is off and the arcade works as before.
+
 ### Free: Oracle Cloud Always Free
 
 1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). It asks for a card to verify you; Always Free resources aren't charged. The home region you pick is permanent.

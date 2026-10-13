@@ -1,15 +1,19 @@
 // The arcade server: serves the game client and runs the always-on matches of
-// each game on the same port (WebSocket at /lobby?game=frontline|rally&name=...).
+// each game on the same port (WebSocket at /lobby?game=frontline|rally&name=...),
+// and the live rooms of XApps matches (WebSocket at /room?match=<id>, see rooms.mjs).
 // Usage: node index.mjs
 // PORT (default 8787), HOST (default every interface; 127.0.0.1 behind an HTTPS
 // proxy, so the port isn't reachable from outside), CLIENT_DIR (default ../client/dist) and MAX_MATCHES
-// (default 25 per game, 8 players each) from the env.
+// (default 25 per game, 8 players each) from the env. XAPPS_SUPABASE_URL and XAPPS_SUPABASE_ANON_KEY
+// (XApps' Supabase project URL and public key) turn on XApps rooms; XAPPS_ORIGINS (comma-separated,
+// e.g. https://vibecade.si) limits which sites may open them.
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { Arcade, DEFAULT_MAX_MATCHES } from "./arcade.mjs";
+import { AUTH_TIMEOUT_MS, MATCH_ID, MatchRooms, supabaseVerifier } from "./rooms.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT ?? 8787);
@@ -43,6 +47,11 @@ const BOTS = { frontline: "solo", rally: "fill" };
 const arcades = Object.fromEntries(GAMES.map((game) => [game, new Arcade({ maxMatches, bots: BOTS[game] })]));
 setInterval(() => Object.values(arcades).forEach((a) => a.tick()), 1000);
 
+const XAPPS_URL = (process.env.XAPPS_SUPABASE_URL ?? "").trim();
+const XAPPS_KEY = (process.env.XAPPS_SUPABASE_ANON_KEY ?? "").trim();
+const XAPPS_ORIGINS = (process.env.XAPPS_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+const rooms = XAPPS_URL && XAPPS_KEY ? new MatchRooms({ verify: supabaseVerifier({ url: XAPPS_URL, anonKey: XAPPS_KEY }) }) : null;
+
 /** /health: everyone online across the games (`players`, `online`), and each game's matches. */
 function health() {
   const games = Object.fromEntries(GAMES.map((game) => [game, arcades[game].health()]));
@@ -53,6 +62,7 @@ function health() {
     players: all.flatMap((g) => g.players),
     watching: all.reduce((n, g) => n + g.watching, 0),
     games,
+    rooms: rooms ? rooms.health() : null,
     load: lastLoad,
   };
 }
@@ -94,6 +104,13 @@ const server = createServer((req, res) => {
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", "http://x");
+  if (url.pathname === "/room") {
+    const match = url.searchParams.get("match") ?? "";
+    const origin = req.headers.origin ?? "";
+    if (!rooms || !MATCH_ID.test(match) || (XAPPS_ORIGINS.length > 0 && !XAPPS_ORIGINS.includes(origin))) return socket.destroy();
+    wss.handleUpgrade(req, socket, head, (ws) => acceptRoom(ws, match));
+    return;
+  }
   if (url.pathname !== "/lobby") return socket.destroy();
   const game = GAMES.includes(url.searchParams.get("game")) ? url.searchParams.get("game") : "frontline";
   wss.handleUpgrade(req, socket, head, (ws) => accept(ws, arcades[game], url.searchParams.get("name")));
@@ -134,6 +151,41 @@ function accept(ws, arcade, name) {
   ws.on("close", () => {
     clearInterval(refill);
     arcade.leave(conn);
+  });
+}
+
+/** An XApps match room connection: sign in first, then events and presence (rooms.mjs). */
+function acceptRoom(ws, matchId) {
+  let budget = MESSAGES_PER_SECOND;
+  const refill = setInterval(() => (budget = MESSAGES_PER_SECOND), 1000);
+  const conn = {
+    closed: false,
+    close: (code, reason) => ws.close(code, reason),
+    send: (msg) => {
+      if (ws.readyState !== ws.OPEN) return;
+      const text = JSON.stringify(msg);
+      load.out += 1;
+      load.bytes += text.length;
+      ws.send(text);
+    },
+  };
+  rooms.open(conn, matchId);
+  const authTimer = setTimeout(() => conn.userId === null && ws.close(4401, "sign in first"), AUTH_TIMEOUT_MS);
+  ws.on("message", (data) => {
+    load.in += 1;
+    if (--budget < 0) return;
+    let msg;
+    try {
+      msg = JSON.parse(String(data));
+    } catch {
+      return;
+    }
+    void rooms.handle(conn, msg);
+  });
+  ws.on("close", () => {
+    clearInterval(refill);
+    clearTimeout(authTimer);
+    rooms.leave(conn);
   });
 }
 
