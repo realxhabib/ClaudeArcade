@@ -35,7 +35,7 @@ test("signs in, then relays events to the others with the sender set by the serv
   const rooms = new MatchRooms({ verify: fakeVerify(), now: () => 42 });
   const a = await joined(rooms, "alice");
   const b = await joined(rooms, "bob");
-  assert.deepEqual(last(a, "welcome"), { t: "welcome", you: "alice" });
+  assert.deepEqual(last(a, "welcome"), { t: "welcome", you: "alice", holds: true, state: null });
   await rooms.handle(a, { t: "event", event: { kind: "app", type: "pos", payload: { x: 1 } }, from: "mallory" });
   assert.deepEqual(last(b, "event"), { t: "event", from: "alice", at: 42, event: { kind: "app", type: "pos", payload: { x: 1 } } });
   assert.equal(last(a, "event"), undefined, "not echoed to the sender");
@@ -53,7 +53,7 @@ test("refuses bad sign-ins and people outside the match; ignores everything befo
   assert.equal(carol.closedWith.code, 4403);
   const elsewhere = await joined(rooms, "alice", OTHER);
   assert.equal(elsewhere.closedWith.code, 4403);
-  assert.deepEqual(rooms.health(), { rooms: 0, connections: 0 });
+  assert.deepEqual(rooms.health(), { rooms: 0, connections: 0, states: 0 });
 });
 
 test("presence: one entry per person, ready if any of their tabs is, updated as people come and go", async () => {
@@ -96,7 +96,7 @@ test("supabaseVerifier asks who the token is, then is_room_member as them", asyn
     return json(JSON.parse(init.body).p_topic === `match:${MATCH}`);
   };
   const verify = supabaseVerifier({ url: "https://proj.supabase.co/", anonKey: "anon", fetch });
-  assert.deepEqual(await verify("good", MATCH), { userId: "u1" });
+  assert.deepEqual(await verify("good", MATCH), { userId: "u1", seated: false });
   assert.deepEqual(calls[1], { url: "https://proj.supabase.co/rest/v1/rpc/is_room_member", auth: "Bearer good", key: "anon", body: JSON.stringify({ p_topic: `match:${MATCH}` }) });
   assert.deepEqual(await verify("good", OTHER), { error: "forbidden" });
   assert.deepEqual(await verify("bad", MATCH), { error: "unauthenticated" });
@@ -162,7 +162,7 @@ test("the server: /room signs in against Supabase and relays between real socket
   await new Promise((r) => wrongSite.on("error", () => r()));
 
   const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
-  assert.deepEqual(health.rooms, { rooms: 1, connections: 2 });
+  assert.deepEqual(health.rooms, { rooms: 1, connections: 2, states: 0 });
   a.ws.close();
   b.ws.close();
 });

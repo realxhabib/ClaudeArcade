@@ -131,6 +131,8 @@ XAPPS_ORIGINS=https://vibecade.si
 
 then `systemctl restart claudearcade`. `/health` shows the rooms open. Without the file, `/room` is off and the arcade works as before.
 
+The rooms also hold each match's shared state (Frontline's kill list, clock and end) in memory, so players' pages save it to the room instead of to XApps' database: the room orders the writes and sends every new copy to everyone, and XApps only hears about the match when the results come in. Each page keeps the latest copy and offers it when it reconnects, so a restarted server picks up where the match was. Nothing to configure.
+
 ### Free: Oracle Cloud Always Free
 
 1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). It asks for a card to verify you; Always Free resources aren't charged. The home region you pick is permanent.
