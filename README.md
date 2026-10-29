@@ -133,6 +133,16 @@ then `systemctl restart claudearcade`. `/health` shows the rooms open. Without t
 
 The rooms also hold each match's shared state (Frontline's kill list, clock and end) in memory, so players' pages save it to the room instead of to XApps' database: the room orders the writes and sends every new copy to everyone, and XApps only hears about the match when the results come in. Each page keeps the latest copy and offers it when it reconnects, so a restarted server picks up where the match was. Nothing to configure.
 
+### Your own games, on the same server
+
+`hosting/games.sh` puts other games you build on the arcade's server, each on its own HTTPS subdomain, without touching the arcade. Install it once, as root (the DigitalOcean web console works):
+
+```
+curl -fsSL https://raw.githubusercontent.com/realxhabib/ClaudeArcade/main/hosting/games.sh -o /usr/local/bin/games && chmod +x /usr/local/bin/games
+```
+
+then `games add snake https://github.com/you/snake` clones the repo, runs `npm ci` and `npm run build` if it has a package.json, and serves it at `https://snake.<ip-with-dashes>.sslip.io` (Caddy gets the certificate). A repo whose package.json has a `start` script runs as its own service (`game-snake`, with `PORT` and `HOST=127.0.0.1` set, behind Caddy, WebSockets included); anything else is served as files from `dist`, `build`, `out`, `public` or the root, whichever has an `index.html` (`--type` and `--dir` override that). `games update` pulls and rebuilds them, `games password snake` asks for a password before it opens, and `games list`, `logs`, `restart` and `remove` do what they say; `games help` lists everything. With your own domain, point a wildcard A record (`*.games.example.com`) at the server and run `games domain games.example.com`. A server game's settings go in `/etc/games/<name>.env`; private GitHub repos need `GITHUB_TOKEN=<read-only token>` in `/etc/games/games.conf`.
+
 ### Free: Oracle Cloud Always Free
 
 1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). It asks for a card to verify you; Always Free resources aren't charged. The home region you pick is permanent.
