@@ -6,6 +6,8 @@
 # Then:
 #   games add <name> <git url> [options]   pull, build and serve a game
 #   games update [<name>]                  pull and rebuild one game (or all of them)
+#   games auto [on|off]                    rebuilds games by itself when their repo gets new commits
+#                                          (checks every 5 minutes; on unless turned off)
 #   games list                             every game, its type and its address
 #   games logs <name>                      a server game's log (follows it)
 #   games restart <name>                   restarts a server game
@@ -108,6 +110,49 @@ ensure_tools() {
 	# arcade's setup.sh keeps when it rewrites its own block.
 	touch "$CADDYFILE"
 	grep -qxF "import $SITES/*.caddy" "$CADDYFILE" || printf 'import %s/*.caddy\n' "$SITES" >> "$CADDYFILE"
+	[ "$(conf_get "$CONF" AUTO)" = off ] || auto_on
+}
+
+# A timer that runs `games update --changed` every 5 minutes, so a push to a game's repo goes live by itself.
+auto_on() {
+	self=$(readlink -f "$0")
+	cat > /etc/systemd/system/games-update.service <<EOF
+[Unit]
+Description=Rebuild games whose repos have new commits
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$self update --changed
+EOF
+	cat > /etc/systemd/system/games-update.timer <<EOF
+[Unit]
+Description=Check the games' repos for new commits every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+EOF
+	systemctl daemon-reload
+	systemctl enable -q --now games-update.timer
+}
+
+# One change at a time: a `games add` by hand and the timer's update don't build over each other.
+lock() { # lock [-n]: with -n, gives up quietly when something else holds it
+	command -v flock >/dev/null || return 0
+	exec 9> /run/games.lock
+	if [ "${1:-}" = -n ]; then flock -n 9 || exit 0; else flock 9; fi
+}
+
+# The commit a game's repo is at now (on its branch), or nothing when it can't be reached.
+remote_commit() { # remote_commit <game.conf>
+	repo=$(conf_get "$1" REPO) branch=$(conf_get "$1" BRANCH)
+	ref=HEAD; [ -n "$branch" ] && ref="refs/heads/$branch"
+	git ls-remote "$(clone_url "$repo")" "$ref" 2>/dev/null | head -n 1 | cut -f 1
 }
 
 # Runs `caddy validate` and reloads, or puts back the site file it was given (or removes a new one).
@@ -152,14 +197,20 @@ build() { # build <name>
 	app="$dir/app.new"
 	# Don't leave a token in the clone's settings.
 	git -C "$app" remote set-url origin "$repo"
+	built_commit=$(git -C "$app" rev-parse HEAD)
 	if [ -z "$type" ]; then
 		if has_script "$app" start; then type=node; else type=static; fi
 		conf_set "$c" TYPE "$type"
 	fi
 	if [ -f "$app/package.json" ]; then
 		say "installing its packages"
-		if [ -f "$app/package-lock.json" ]; then (cd "$app" && npm ci --no-audit --no-fund); else (cd "$app" && npm install --no-audit --no-fund); fi
-		if has_script "$app" build; then say "building it"; (cd "$app" && npm run build); fi
+		# (Each step checks itself: deploy runs under `||`, where set -e is off.)
+		if [ -f "$app/package-lock.json" ]; then
+			(cd "$app" && npm ci --no-audit --no-fund) || die "npm ci failed."
+		else
+			(cd "$app" && npm install --no-audit --no-fund) || die "npm install failed."
+		fi
+		if has_script "$app" build; then say "building it"; (cd "$app" && npm run build) || die "npm run build failed."; fi
 	fi
 	if [ "$type" = static ]; then
 		if [ -z "$serve" ]; then
@@ -176,7 +227,7 @@ build() { # build <name>
 	chown -R games "$app"
 	rm -rf "$dir/app.old"
 	[ -d "$dir/app" ] && mv "$dir/app" "$dir/app.old"
-	mv "$app" "$dir/app"
+	mv "$app" "$dir/app" || die "couldn't swap in the new build."
 	rm -rf "$dir/app.old"
 }
 
@@ -245,6 +296,8 @@ deploy() { # deploy <name>: build, (re)start, serve
 		fi
 	fi
 	write_site "$1"
+	conf_set "$ROOT/$1/game.conf" COMMIT "$built_commit"
+	conf_set "$ROOT/$1/game.conf" FAILED ""
 	say "$1 is up: https://$1.$(base_domain)"
 }
 
@@ -265,6 +318,7 @@ cmd_add() {
 	done
 	case "$type" in ''|static|node) ;; *) die "--type is static or node." ;; esac
 	case "$serve" in /*|*..*) die "--dir is a folder inside the repo, like dist." ;; esac
+	lock
 	[ -f "$ROOT/$name/game.conf" ] && die "'$name' is already a game: 'games update $name' rebuilds it, 'games remove $name' takes it down."
 	ensure_tools
 	mkdir -p "$ROOT/$name"
@@ -278,9 +332,33 @@ cmd_add() {
 		teardown "$name"
 		die "'$name' wasn't added."
 	fi
+	[ "$(conf_get "$CONF" AUTO)" = off ] || say "pushes to its repo go live by themselves within 5 minutes ('games auto off' stops that)."
+}
+
+cmd_auto() {
+	case "${1:-}" in
+		'') if [ "$(conf_get "$CONF" AUTO)" = off ]; then say "auto-update is off ('games auto on')."; else say "auto-update is on: games rebuild within 5 minutes of a push ('journalctl -u games-update' shows what it did)."; fi ;;
+		on) mkdir -p "$ETC"; conf_set "$CONF" AUTO ""; auto_on; say "auto-update is on." ;;
+		off) mkdir -p "$ETC"; conf_set "$CONF" AUTO off; systemctl disable -q --now games-update.timer 2>/dev/null || true; say "auto-update is off: 'games update' rebuilds by hand." ;;
+		*) die "usage: games auto [on|off]" ;;
+	esac
 }
 
 cmd_update() {
+	if [ "${1:-}" = --changed ]; then
+		# The timer: only games whose repo moved, and not again for a commit that failed to build.
+		lock -n
+		for c in "$ROOT"/*/game.conf; do
+			[ -f "$c" ] || continue
+			n=$(basename "$(dirname "$c")")
+			now=$(remote_commit "$c")
+			[ -n "$now" ] && [ "$now" != "$(conf_get "$c" COMMIT)" ] && [ "$now" != "$(conf_get "$c" FAILED)" ] || continue
+			say "$n has new commits"
+			(deploy "$n") || { conf_set "$c" FAILED "$now"; say "$n didn't build at $now (it keeps running the version it had)."; }
+		done
+		return
+	fi
+	lock
 	ensure_tools
 	if [ $# -eq 0 ]; then
 		for c in "$ROOT"/*/game.conf; do
@@ -357,7 +435,8 @@ case "$cmd" in
 	list|ls) cmd_list ;;
 	add) need_root; cmd_add "$@" ;;
 	update) need_root; cmd_update "$@" ;;
-	remove|rm) need_root; cmd_remove "$@" ;;
+	auto) need_root; cmd_auto "$@" ;;
+	remove|rm) need_root; lock; cmd_remove "$@" ;;
 	password) need_root; cmd_password "$@" ;;
 	domain) need_root; cmd_domain "$@" ;;
 	logs) [ $# -ge 1 ] || die "usage: games logs <name>"; exists "$1"; journalctl -u "game-$1" -n 100 -f ;;
